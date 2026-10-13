@@ -1,98 +1,191 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+
+import { useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useColorScheme,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+import CreateNoteModal from '@/components/create-note-modal';
+import SavedItemsList from '@/components/saved-items-list';
 
 export default function HomeScreen() {
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
+
+  // Colors for light and dark appearance
+  const palette = {
+    background: isDark ? '#171B18' : '#F7F4ED',
+    text: isDark ? '#F7F4EE' : '#222A22',
+    secondary: isDark ? '#C3CBC1' : '#526457',
+    accent: isDark ? '#F0BE8C' : '#8A4B32',
+  };
+
+  // Controls whether the Create Note modal is open
+  const [isNoteModalVisible, setIsNoteModalVisible] = useState(false);
+
+  // Used to refresh the library after saving a note
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  function handleNoteSaved() {
+    // Trigger SavedItemsList to fetch updated SQLite data
+    setRefreshKey((current) => current + 1);
+
+    Alert.alert(
+      'Note saved',
+      'Your note was saved successfully.'
+    );
+  }
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <SafeAreaView
+      style={[
+        styles.container,
+        { backgroundColor: palette.background },
+      ]}
+    >
+      {/* App branding */}
+      <View style={styles.header}>
+        <Text
+          style={[
+            styles.wordmark,
+            { color: palette.text },
+          ]}
+        >
+          folio.
+        </Text>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+        <Text
+          style={[
+            styles.eyebrow,
+            { color: palette.accent },
+          ]}
+        >
+          YOUR PERSONAL LIBRARY
+        </Text>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+        <View
+          style={[
+            styles.accentRule,
+            { backgroundColor: palette.accent },
+          ]}
+        />
+      </View>
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+      {/* Library content */}
+      <View style={styles.content}>
+        <Text
+          style={[
+            styles.heading,
+            { color: palette.text },
+          ]}
+        >
+          Good things are worth keeping.
+        </Text>
+
+        <Text
+          style={[
+            styles.description,
+            { color: palette.secondary },
+          ]}
+        >
+          A quiet home for the notes, links, images, and ideas
+          you want to come back to.
+        </Text>
+
+        {/* Open the Create Note form */}
+        <Pressable
+          style={styles.newNoteButton}
+          onPress={() => setIsNoteModalVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Create a new note"
+        >
+          <Text style={styles.newNoteButtonText}>
+            + New Note
+          </Text>
+        </Pressable>
+
+        {/* Display actual saved items from SQLite */}
+        <SavedItemsList refreshKey={refreshKey} />
+      </View>
+
+      {/* Note creation form */}
+      <CreateNoteModal
+        visible={isNoteModalVisible}
+        onClose={() => setIsNoteModalVisible(false)}
+        onSaved={handleNoteSaved}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    paddingHorizontal: 26,
   },
-  safeArea: {
+
+  header: {
+    paddingTop: 30,
+    gap: 12,
+  },
+
+  wordmark: {
+    fontSize: 36,
+    fontWeight: '600',
+    letterSpacing: -2,
+  },
+
+  eyebrow: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 2.5,
+  },
+
+  accentRule: {
+    width: 42,
+    height: 3,
+    borderRadius: 999,
+    marginTop: 8,
+  },
+
+  content: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
+    paddingTop: 35,
+    minHeight: 0,
+  },
+
+  heading: {
+    fontSize: 40,
+    fontWeight: '500',
+    lineHeight: 47,
+    letterSpacing: -1.8,
+    maxWidth: 330,
+  },
+
+  description: {
+    fontSize: 15,
+    lineHeight: 24,
+    marginTop: 18,
+    maxWidth: 315,
+  },
+
+  newNoteButton: {
+    backgroundColor: '#315C46',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
     alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+    marginTop: 28,
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+
+  newNoteButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
