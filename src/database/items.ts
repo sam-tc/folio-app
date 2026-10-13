@@ -131,3 +131,80 @@ export async function updateNote(
     throw new Error('Note not found. It may have been deleted.');
   }
 }
+
+
+
+function validateItemId(id: number): void {
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error('Invalid item ID.');
+  }
+}
+
+export async function archiveItem(
+  db: SQLiteDatabase,
+  id: number
+): Promise<void> {
+  validateItemId(id);
+
+  const result = await db.runAsync(
+    `UPDATE items
+     SET is_archived = 1, updated_at = ?
+     WHERE id = ? AND is_archived = 0`,
+    [new Date().toISOString(), id]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error('Item not found or already archived.');
+  }
+}
+
+export async function restoreItem(
+  db: SQLiteDatabase,
+  id: number
+): Promise<void> {
+  validateItemId(id);
+
+  const result = await db.runAsync(
+    `UPDATE items
+     SET is_archived = 0, updated_at = ?
+     WHERE id = ? AND is_archived = 1`,
+    [new Date().toISOString(), id]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error('Item not found or already restored.');
+  }
+}
+
+export async function deleteItem(
+  db: SQLiteDatabase,
+  id: number
+): Promise<void> {
+  validateItemId(id);
+
+  const result = await db.runAsync(
+    'DELETE FROM items WHERE id = ?',
+    [id]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error('Item not found. It may already be deleted.');
+  }
+}
+
+
+export async function getArchivedItems(
+  db: SQLiteDatabase
+): Promise<SavedItem[]> {
+  const rows = await db.getAllAsync<ItemRow>(
+    `SELECT * FROM items
+     WHERE is_archived = 1
+     ORDER BY updated_at DESC, id DESC`
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    tags: JSON.parse(row.tags) as string[],
+    is_archived: row.is_archived === 1,
+  }));
+}
