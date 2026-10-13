@@ -86,3 +86,48 @@ export async function getInboxItems(
     is_archived: row.is_archived === 1,
   }));
 }
+
+
+
+export async function updateNote(
+  db: SQLiteDatabase,
+  id: number,
+  title: string,
+  content: string,
+  tags: string[]
+): Promise<void> {
+  const cleanTitle = title.trim();
+  const cleanContent = content.trim();
+
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error('Invalid note ID.');
+  }
+
+  if (!cleanTitle || !cleanContent) {
+    throw new Error('Title and content cannot be empty.');
+  }
+
+  const cleanTags = [
+    ...new Set(tags.map((tag) => tag.trim()).filter(Boolean)),
+  ];
+
+  const result = await db.runAsync(
+    `UPDATE items
+     SET title = ?,
+         content = ?,
+         tags = ?,
+         updated_at = ?
+     WHERE id = ? AND type = 'note'`,
+    [
+      cleanTitle,
+      cleanContent,
+      JSON.stringify(cleanTags),
+      new Date().toISOString(),
+      id,
+    ]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error('Note not found. It may have been deleted.');
+  }
+}

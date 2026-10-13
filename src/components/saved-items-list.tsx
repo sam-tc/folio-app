@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  Pressable, 
   ScrollView,
   StyleSheet,
   Text,
@@ -13,9 +14,10 @@ import { getInboxItems, type SavedItem } from '@/database/items';
 
 type Props = {
   refreshKey: number;
+  onSelectNote: (note: SavedItem) => void;
 };
 
-export default function SavedItemsList({ refreshKey }: Props) {
+export default function SavedItemsList({ refreshKey, onSelectNote }: Props) {
   const db = useSQLiteContext();
   const isDark = useColorScheme() === 'dark';
 
@@ -91,10 +93,14 @@ export default function SavedItemsList({ refreshKey }: Props) {
       </Text>
 
       {items.map((item) => (
-        <View
-          key={item.id}
-          style={[styles.card, { borderColor }]}
-        >
+          <Pressable
+            key={item.id}
+            style={[styles.card, { borderColor }]}
+            onPress={() => onSelectNote(item)}
+            disabled={item.type !== 'note'}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${item.title}`}
+          >
           <Text style={[styles.type, { color: secondaryColor }]}>
             {item.type.toUpperCase()}
           </Text>
@@ -117,7 +123,7 @@ export default function SavedItemsList({ refreshKey }: Props) {
               {item.tags.map((tag) => `#${tag}`).join('  ')}
             </Text>
           ) : null}
-        </View>
+          </Pressable>
       ))}
     </ScrollView>
   );

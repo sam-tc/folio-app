@@ -13,6 +13,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import CreateNoteModal from '@/components/create-note-modal';
 import SavedItemsList from '@/components/saved-items-list';
 
+import EditNoteModal from '@/components/edit-note-modal';
+import type { SavedItem } from '@/database/items';
+
 export default function HomeScreen() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -30,6 +33,9 @@ export default function HomeScreen() {
 
   // Used to refresh the library after saving a note
   const [refreshKey, setRefreshKey] = useState(0);
+
+  const [selectedNote, setSelectedNote] =
+    useState<SavedItem | null>(null);
 
   function handleNoteSaved() {
     // Trigger SavedItemsList to fetch updated SQLite data
@@ -110,7 +116,10 @@ export default function HomeScreen() {
         </Pressable>
 
         {/* Display actual saved items from SQLite */}
-        <SavedItemsList refreshKey={refreshKey} />
+        <SavedItemsList
+          refreshKey={refreshKey}
+          onSelectNote={setSelectedNote}
+        />
       </View>
 
       {/* Note creation form */}
@@ -119,6 +128,16 @@ export default function HomeScreen() {
         onClose={() => setIsNoteModalVisible(false)}
         onSaved={handleNoteSaved}
       />
+
+      <EditNoteModal
+        visible={selectedNote !== null}
+        note={selectedNote}
+        onClose={() => setSelectedNote(null)}
+        onSaved={() => {
+          setRefreshKey((current) => current + 1);
+        }}
+      />
+
     </SafeAreaView>
   );
 }
