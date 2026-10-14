@@ -24,6 +24,7 @@ import {
 } from '@/database/search';
 
 import { ItemActionsMenu } from '@/components/item-actions-menu';
+import EditImageModal from '@/components/edit-image-modal';
 
 type Props = {
   refreshKey: number;
@@ -50,6 +51,10 @@ export default function SavedItemsList({
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
   const [busyItemId, setBusyItemId] = useState<number | null>(null);
 
+  // The image currently being edited.
+  const [editingImage, setEditingImage] =
+    useState<SavedItem | null>(null);
+
   const textColor = isDark ? '#F5F5F0' : '#222A22';
   const secondaryColor = isDark ? '#C3CBC1' : '#526457';
   const borderColor = isDark ? '#48594D' : '#D3DBD0';
@@ -58,8 +63,8 @@ export default function SavedItemsList({
   const hasActiveFilter = filter !== 'all';
   const isSearching = hasActiveSearch || hasActiveFilter;
 
-  // Reload whenever the screen is focused, something
-  // changes, or a search/filter is updated.
+  // Refresh Library when the screen gains focus,
+  // when an item changes, or when Search changes.
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -92,7 +97,6 @@ export default function SavedItemsList({
 
       void loadItems();
 
-      // Ignore results from searches that are no longer active.
       return () => {
         active = false;
       };
@@ -105,7 +109,6 @@ export default function SavedItemsList({
     ])
   );
 
-  // Handle tapping a saved item.
   async function handleCardPress(item: SavedItem) {
     if (item.type === 'note') {
       onSelectNote(item);
@@ -129,7 +132,21 @@ export default function SavedItemsList({
     }
   }
 
-  // Archive an item.
+  // Notes and Links use the existing editor.
+  // Images use the new image metadata editor.
+  function handleEdit(item: SavedItem) {
+    if (item.type === 'image') {
+      setEditingImage(item);
+    } else {
+      onSelectNote(item);
+    }
+  }
+
+  function handleImageSaved() {
+    // Reload cards so the updated image details appear.
+    setLocalRefreshKey((current) => current + 1);
+  }
+
   async function confirmArchive(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -172,7 +189,6 @@ export default function SavedItemsList({
     );
   }
 
-  // Move an item to Recently Deleted.
   async function moveItemToTrash(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -216,7 +232,6 @@ export default function SavedItemsList({
     );
   }
 
-  // Initial loading state.
   if (!hasLoaded) {
     return (
       <Text
@@ -230,7 +245,6 @@ export default function SavedItemsList({
     );
   }
 
-  // Database error state.
   if (error) {
     return (
       <View style={styles.messageContainer}>
@@ -250,7 +264,6 @@ export default function SavedItemsList({
     );
   }
 
-  // Empty Library or no matching search results.
   if (items.length === 0) {
     return (
       <View
@@ -309,7 +322,7 @@ export default function SavedItemsList({
             { borderColor },
           ]}
         >
-          {/* Saved item content */}
+          {/* Tapping the card opens its content */}
           <Pressable
             style={styles.cardContent}
             onPress={() => {
@@ -343,7 +356,7 @@ export default function SavedItemsList({
               {item.title}
             </Text>
 
-            {/* Image thumbnail */}
+            {/* Image preview */}
             {item.type === 'image' && item.image_uri && (
               <Image
                 source={{ uri: item.image_uri }}
@@ -353,7 +366,7 @@ export default function SavedItemsList({
               />
             )}
 
-            {/* Note content, URL or image description */}
+            {/* Note text, link URL, or image description */}
             {item.content ? (
               <Text
                 style={[
@@ -381,21 +394,16 @@ export default function SavedItemsList({
             ) : null}
           </Pressable>
 
-          {/* Existing three-dot action menu */}
+          {/* Three-dot menu now supports editing images */}
           <View style={styles.menuRow}>
             <ItemActionsMenu
               itemTitle={item.title}
               disabled={busyItemId !== null}
               actions={[
-                ...(item.type === 'note' ||
-                item.type === 'link'
-                  ? [
-                      {
-                        label: 'Edit',
-                        onPress: () => onSelectNote(item),
-                      },
-                    ]
-                  : []),
+                {
+                  label: 'Edit',
+                  onPress: () => handleEdit(item),
+                },
                 {
                   label: 'Archive',
                   onPress: () => handleArchive(item),
@@ -410,6 +418,14 @@ export default function SavedItemsList({
           </View>
         </View>
       ))}
+
+      {/* Image editor stays within the Library component,
+          so Home and Search don't need changes. */}
+      <EditImageModal
+        image={editingImage}
+        onClose={() => setEditingImage(null)}
+        onSaved={handleImageSaved}
+      />
     </View>
   );
 }
