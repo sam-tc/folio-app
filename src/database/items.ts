@@ -10,6 +10,7 @@ export type NewItem = {
   tags?: string[];
 };
 
+
 type ItemRow = {
   id: number;
   type: ItemType;
@@ -20,6 +21,7 @@ type ItemRow = {
   created_at: string;
   updated_at: string;
   is_archived: number;
+  deleted_at: string | null;
 };
 
 export type SavedItem = Omit<ItemRow, 'tags' | 'is_archived'> & {
@@ -86,8 +88,6 @@ export async function getInboxItems(
     is_archived: row.is_archived === 1,
   }));
 }
-
-
 
 export async function updateNote(
   db: SQLiteDatabase,
@@ -176,20 +176,52 @@ export async function restoreItem(
   }
 }
 
-export async function deleteItem(
+
+export async function permanentlyDeleteItem(
   db: SQLiteDatabase,
   id: number
 ): Promise<void> {
-  validateItemId(id);
+  // Make sure the supplied item ID is valid.
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error('Invalid item ID.');
+  }
 
+  // Only permanently delete items already in Recently Deleted.
   const result = await db.runAsync(
-    'DELETE FROM items WHERE id = ?',
+    `DELETE FROM items
+     WHERE id = ?
+       AND deleted_at IS NOT NULL`,
     [id]
   );
 
+  // Check whether SQLite actually deleted one item.
   if (result.changes !== 1) {
-    throw new Error('Item not found. It may already be deleted.');
+    throw new Error(
+      'Item not found in Recently Deleted.'
+    );
   }
+}
+
+
+export async function purgeExpiredDeletedItems(
+  db: SQLiteDatabase,
+  now: Date = new Date()
+): Promise<number> {
+  // Calculate the timestamp exactly 30 days ago.
+  const cutoffDate = new Date(
+    now.getTime() - RECOVERY_PERIOD_MS
+  ).toISOString();
+
+  // Permanently delete only expired items.
+  const result = await db.runAsync(
+    `DELETE FROM items
+     WHERE deleted_at IS NOT NULL
+       AND deleted_at <= ?`,
+    [cutoffDate]
+  );
+
+  // Return how many records were deleted.
+  return result.changes;
 }
 
 
@@ -207,4 +239,84 @@ export async function getArchivedItems(
     tags: JSON.parse(row.tags) as string[],
     is_archived: row.is_archived === 1,
   }));
+}
+
+
+export async function moveToRecentlyDeleted(
+  db: SQLiteDatabase,
+  id: number
+): Promise<void> {
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error('Invalid item ID.');
+  }
+
+  const deletedAt = new Date().toISOString();
+
+  const result = await db.runAsync(
+    `UPDATE items
+     SET deleted_at = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND deleted_at IS NULL`,
+    [deletedAt, deletedAt, id]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error(
+      'Item not found or already moved to Recently Deleted.'
+    );
+  }
+}
+
+
+export async function getRecentlyDeletedItems(
+  db: SQLiteDatabase
+): Promise<SavedItem[]> {
+  const rows = await db.getAllAsync<ItemRow>(
+    `SELECT * FROM items
+     WHERE deleted_at IS NOT NULL
+     ORDER BY deleted_at DESC, id DESC`
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    tags: JSON.parse(row.tags) as string[],
+    is_archived: row.is_archived === 1,
+  }));
+}
+
+
+const RECOVERY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
+export async function restoreDeletedItem(
+  db: SQLiteDatabase,
+  id: number
+): Promise<void> {
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error('Invalid item ID.');
+  }
+
+  const cutoffDate = new Date(
+    Date.now() - RECOVERY_PERIOD_MS
+  ).toISOString();
+
+  const result = await db.runAsync(
+    `UPDATE items
+     SET deleted_at = NULL,
+         updated_at = ?
+     WHERE id = ?
+       AND deleted_at IS NOT NULL
+       AND deleted_at > ?`,
+    [
+      new Date().toISOString(),
+      id,
+      cutoffDate,
+    ]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error(
+      'Item not found or its 30-day recovery period has expired.'
+    );
+  }
 }
