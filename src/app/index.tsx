@@ -63,6 +63,16 @@ export default function HomeScreen() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedFilter, setSelectedFilter] =
     useState<LibraryFilter>('all');
+  const [searchExpanded, setSearchExpanded] = useState(false);
+
+  const hasSearchCriteria =
+    searchText.trim().length > 0 || selectedFilter !== 'all';
+
+  function clearSearch() {
+    setSearchText('');
+    setDebouncedSearch('');
+    setSelectedFilter('all');
+  }
 
   // Wait briefly while typing before querying SQLite.
   useEffect(() => {
@@ -214,115 +224,195 @@ export default function HomeScreen() {
           </Text>
         </Pressable>
 
-        {/* Search controls */}
+        {/* A quiet, collapsible search area. Active filters stay
+            in effect when the controls are collapsed. */}
         <View style={styles.searchSection}>
-          <Text
-            style={[
-              styles.searchLabel,
-              { color: palette.secondary },
-            ]}
-          >
-            EXPLORE YOUR LIBRARY
-          </Text>
-
-          <View
-            style={[
-              styles.searchBox,
-              {
-                backgroundColor: palette.searchBackground,
-                borderColor: palette.border,
-              },
-            ]}
-          >
-            <TextInput
-              style={[
-                styles.searchInput,
-                { color: palette.text },
-              ]}
-              value={searchText}
-              onChangeText={setSearchText}
-              placeholder="Search notes, links, images, tags..."
-              placeholderTextColor={palette.placeholder}
-              returnKeyType="search"
-              autoCapitalize="none"
-              autoCorrect={false}
-              accessibilityLabel="Search your library"
-            />
-
-            {searchText.length > 0 && (
-              <Pressable
-                style={styles.clearButton}
-                onPress={() => {
-                  setSearchText('');
-                  setDebouncedSearch('');
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear search"
-                hitSlop={8}
+          <View style={styles.searchHeadingRow}>
+            <View style={styles.searchHeadingText}>
+              <Text
+                style={[
+                  styles.searchLabel,
+                  { color: palette.secondary },
+                ]}
               >
-                <Text
-                  style={[
-                    styles.clearText,
-                    { color: palette.secondary },
-                  ]}
-                >
-                  ×
-                </Text>
-              </Pressable>
-            )}
+                YOUR COLLECTION
+              </Text>
+              <Text
+                style={[
+                  styles.searchHint,
+                  { color: palette.secondary },
+                ]}
+              >
+                {hasSearchCriteria
+                  ? 'Showing your selected results'
+                  : 'Everything you have kept, in one place'}
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={() => setSearchExpanded((value) => !value)}
+              style={[
+                styles.searchToggle,
+                {
+                  borderColor: palette.border,
+                  backgroundColor: searchExpanded
+                    ? '#315C46'
+                    : palette.searchBackground,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={
+                searchExpanded
+                  ? 'Close library search and filters'
+                  : 'Open library search and filters'
+              }
+              accessibilityState={{ expanded: searchExpanded }}
+            >
+              <Text
+                style={[
+                  styles.searchToggleText,
+                  { color: searchExpanded ? '#FFFFFF' : palette.text },
+                ]}
+              >
+                {searchExpanded ? 'Close' : 'Search'}
+              </Text>
+              <Text
+                style={[
+                  styles.searchToggleGlyph,
+                  { color: searchExpanded ? '#FFFFFF' : palette.text },
+                ]}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                {searchExpanded ? '−' : '+'}
+              </Text>
+            </Pressable>
           </View>
 
-          {/* Filter chips scroll horizontally */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.filterRow}
-            style={styles.filterScroll}
-          >
-            {FILTER_OPTIONS.map((option) => {
-              const isSelected =
-                selectedFilter === option.value;
+          {hasSearchCriteria && (
+            <View style={styles.activeSearchRow}>
+              <Text
+                style={[
+                  styles.activeSearchText,
+                  { color: palette.secondary },
+                ]}
+                numberOfLines={1}
+              >
+                {searchText.trim()
+                  ? `“${searchText.trim()}”`
+                  : 'All items'}
+                {selectedFilter !== 'all'
+                  ? ` · ${FILTER_OPTIONS.find(
+                      (option) => option.value === selectedFilter
+                    )?.label ?? 'Filtered'}`
+                  : ''}
+              </Text>
+              <Pressable
+                onPress={clearSearch}
+                style={styles.resetButton}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search and filters"
+              >
+                <Text style={styles.resetText}>Clear all</Text>
+              </Pressable>
+            </View>
+          )}
 
-              return (
-                <Pressable
-                  key={option.value}
+          {searchExpanded && (
+            <View style={styles.searchControls}>
+              <View
+                style={[
+                  styles.searchBox,
+                  {
+                    backgroundColor: palette.searchBackground,
+                    borderColor: palette.border,
+                  },
+                ]}
+              >
+                <TextInput
                   style={[
-                    styles.filterChip,
-                    {
-                      backgroundColor: isSelected
-                        ? '#315C46'
-                        : 'transparent',
-                      borderColor: isSelected
-                        ? '#315C46'
-                        : palette.border,
-                    },
+                    styles.searchInput,
+                    { color: palette.text },
                   ]}
-                  onPress={() => {
-                    setSelectedFilter(option.value);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    selected: isSelected,
-                  }}
-                  accessibilityLabel={`Filter by ${option.label}`}
-                >
-                  <Text
-                    style={[
-                      styles.filterText,
-                      {
-                        color: isSelected
-                          ? '#FFFFFF'
-                          : palette.secondary,
-                      },
-                    ]}
+                  value={searchText}
+                  onChangeText={setSearchText}
+                  placeholder="Title, text, URL or tag"
+                  placeholderTextColor={palette.placeholder}
+                  returnKeyType="search"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessibilityLabel="Search your library"
+                />
+                {searchText.length > 0 && (
+                  <Pressable
+                    style={styles.clearButton}
+                    onPress={() => {
+                      setSearchText('');
+                      setDebouncedSearch('');
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear search text"
+                    hitSlop={8}
                   >
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+                    <Text
+                      style={[
+                        styles.clearText,
+                        { color: palette.secondary },
+                      ]}
+                    >
+                      ×
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.filterRow}
+                style={styles.filterScroll}
+              >
+                {FILTER_OPTIONS.map((option) => {
+                  const isSelected = selectedFilter === option.value;
+
+                  return (
+                    <Pressable
+                      key={option.value}
+                      style={[
+                        styles.filterChip,
+                        {
+                          backgroundColor: isSelected
+                            ? '#315C46'
+                            : 'transparent',
+                          borderColor: isSelected
+                            ? '#315C46'
+                            : palette.border,
+                        },
+                      ]}
+                      onPress={() => setSelectedFilter(option.value)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      accessibilityLabel={`Filter by ${option.label}`}
+                    >
+                      <Text
+                        style={[
+                          styles.filterText,
+                          {
+                            color: isSelected
+                              ? '#FFFFFF'
+                              : palette.secondary,
+                          },
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
         </View>
 
         {/* Searchable saved items */}
@@ -404,7 +494,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingTop: 28,
-    paddingBottom: 72,
+    paddingBottom: 20,
   },
 
   heading: {
@@ -478,11 +568,77 @@ const styles = StyleSheet.create({
     marginTop: 34,
   },
 
+  searchHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+
+  searchHeadingText: {
+    flex: 1,
+    gap: 6,
+  },
+
   searchLabel: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 2,
-    marginBottom: 14,
+  },
+
+  searchHint: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+
+  searchToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 15,
+    borderWidth: 1,
+    borderRadius: 999,
+  },
+
+  searchToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  searchToggleGlyph: {
+    fontSize: 19,
+    lineHeight: 21,
+    fontWeight: '400',
+  },
+
+  activeSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginTop: 14,
+  },
+
+  activeSearchText: {
+    flex: 1,
+    fontSize: 13,
+  },
+
+  resetButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+
+  resetText: {
+    color: '#8A4B32',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  searchControls: {
+    marginTop: 16,
   },
 
   searchBox: {
