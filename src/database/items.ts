@@ -29,12 +29,47 @@ export type SavedItem = Omit<ItemRow, 'tags' | 'is_archived'> & {
   is_archived: boolean;
 };
 
+export function normalizeWebUrl(input: string): string {
+  const value = input.trim();
+
+  if (!value) {
+    throw new Error('Please enter a website URL.');
+  }
+
+  // Add HTTPS when the user enters something like github.com.
+  const candidate = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)
+    ? value
+    : `https://${value}`;
+
+  try {
+    const url = new URL(candidate);
+
+    // Only allow regular website links.
+    if (
+      (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+      !url.hostname ||
+      !url.hostname.includes('.')
+    ) {
+      throw new Error('Invalid website URL.');
+    }
+
+    return url.toString();
+  } catch {
+    throw new Error(
+      'Please enter a valid website URL, such as https://github.com.'
+    );
+  }
+}
+
 export async function createItem(
   db: SQLiteDatabase,
   item: NewItem
 ): Promise<number> {
   const title = item.title.trim();
-  const content = item.content.trim();
+  const content =
+    item.type === 'link'
+      ? normalizeWebUrl(item.content)
+      : item.content.trim();
   const imageUri = item.imageUri?.trim() || null;
 
   if (!title) {
@@ -133,7 +168,61 @@ export async function updateNote(
   }
 }
 
+export async function updateLink(
+  db: SQLiteDatabase,
+  id: number,
+  title: string,
+  url: string,
+  tags: string[]
+): Promise<void> {
+  // Make sure the selected item has a valid ID.
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error('Invalid link ID.');
+  }
 
+  // Remove unnecessary spaces from the title.
+  const cleanTitle = title.trim();
+
+  if (!cleanTitle) {
+    throw new Error('Please enter a link title.');
+  }
+
+  // Validate and normalize the website address.
+  const cleanUrl = normalizeWebUrl(url);
+
+  // Remove empty and duplicate tags.
+  const cleanTags = [
+    ...new Set(
+      tags.map((tag) => tag.trim()).filter(Boolean)
+    ),
+  ];
+
+  // Update the existing link in SQLite.
+  const result = await db.runAsync(
+    `UPDATE items
+     SET title = ?,
+         content = ?,
+         tags = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND type = 'link'
+       AND is_archived = 0
+       AND deleted_at IS NULL`,
+    [
+      cleanTitle,
+      cleanUrl,
+      JSON.stringify(cleanTags),
+      new Date().toISOString(),
+      id,
+    ]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error(
+      'Link not found in Library. It may have been archived or deleted.'
+    );
+  }
+}
 
 function validateItemId(id: number): void {
   if (!Number.isSafeInteger(id) || id <= 0) {

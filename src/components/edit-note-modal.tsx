@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -15,7 +14,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import { updateNote, type SavedItem } from '@/database/items';
+import {
+  updateLink,
+  updateNote,
+  type SavedItem,
+} from '@/database/items';
 
 type Props = {
   visible: boolean;
@@ -37,7 +40,9 @@ export default function EditNoteModal({
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Fill the form with the selected note's existing data.
+  const isLink = note?.type === 'link';
+
+  // Populate the form with the selected item's saved data.
   useEffect(() => {
     if (visible && note) {
       setTitle(note.title);
@@ -49,10 +54,18 @@ export default function EditNoteModal({
   async function handleSave() {
     if (!note || saving) return;
 
+    // This modal currently supports notes and links only.
+    if (note.type !== 'note' && note.type !== 'link') {
+      Alert.alert('Unsupported item', 'This item cannot be edited yet.');
+      return;
+    }
+
     if (!title.trim() || !content.trim()) {
       Alert.alert(
         'Missing information',
-        'Title and content cannot be empty.'
+        isLink
+          ? 'Please enter a title and website URL.'
+          : 'Please enter a title and note content.'
       );
       return;
     }
@@ -60,19 +73,36 @@ export default function EditNoteModal({
     setSaving(true);
 
     try {
-      await updateNote(
-        db,
-        note.id,
-        title,
-        content,
-        tags.split(',')
-      );
+      const parsedTags = tags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+
+      if (note.type === 'link') {
+        // Update an existing link.
+        await updateLink(
+          db,
+          note.id,
+          title,
+          content,
+          parsedTags
+        );
+      } else {
+        // Update an existing note.
+        await updateNote(
+          db,
+          note.id,
+          title,
+          content,
+          parsedTags
+        );
+      }
 
       onSaved();
       onClose();
     } catch (error) {
       Alert.alert(
-        'Could not update note',
+        isLink ? 'Could not update link' : 'Could not update note',
         error instanceof Error
           ? error.message
           : 'Something went wrong. Please try again.'
@@ -83,9 +113,9 @@ export default function EditNoteModal({
   }
 
   function handleClose() {
-    if (!saving) {
-      onClose();
-    }
+    if (saving) return;
+
+    onClose();
   }
 
   return (
@@ -100,6 +130,7 @@ export default function EditNoteModal({
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
+          {/* Header */}
           <View style={styles.header}>
             <Pressable
               onPress={handleClose}
@@ -110,10 +141,12 @@ export default function EditNoteModal({
               <Text style={styles.cancel}>Cancel</Text>
             </Pressable>
 
-            <Text style={styles.heading}>Edit note</Text>
+            <Text style={styles.heading}>
+              {isLink ? 'Edit link' : 'Edit note'}
+            </Text>
 
             <Pressable
-              onPress={handleSave}
+              onPress={() => void handleSave()}
               disabled={saving}
               accessibilityRole="button"
               accessibilityLabel="Save changes"
@@ -124,6 +157,7 @@ export default function EditNoteModal({
             </Pressable>
           </View>
 
+          {/* Edit form */}
           <ScrollView
             contentContainerStyle={styles.form}
             keyboardShouldPersistTaps="handled"
@@ -134,22 +168,44 @@ export default function EditNoteModal({
               style={styles.input}
               value={title}
               onChangeText={setTitle}
-              placeholder="Note title"
+              placeholder={isLink ? 'Link title' : 'Note title'}
+              placeholderTextColor="#858585"
               maxLength={150}
-              accessibilityLabel="Note title"
+              accessibilityLabel={isLink ? 'Link title' : 'Note title'}
             />
 
-            <Text style={styles.label}>YOUR NOTE</Text>
+            <Text style={styles.label}>
+              {isLink ? 'WEBSITE URL' : 'YOUR NOTE'}
+            </Text>
 
             <TextInput
-              style={[styles.input, styles.textArea]}
+              style={[
+                styles.input,
+                !isLink && styles.textArea,
+              ]}
               value={content}
               onChangeText={setContent}
-              placeholder="Write your note..."
-              multiline
-              textAlignVertical="top"
-              accessibilityLabel="Note content"
+              placeholder={
+                isLink
+                  ? 'https://example.com'
+                  : 'Write your note...'
+              }
+              placeholderTextColor="#858585"
+              multiline={!isLink}
+              textAlignVertical={isLink ? undefined : 'top'}
+              keyboardType={isLink ? 'url' : 'default'}
+              autoCapitalize={isLink ? 'none' : 'sentences'}
+              autoCorrect={!isLink}
+              accessibilityLabel={
+                isLink ? 'Website URL' : 'Note content'
+              }
             />
+
+            {isLink && (
+              <Text style={styles.hint}>
+                Enter a full URL or a domain like github.com.
+              </Text>
+            )}
 
             <Text style={styles.label}>TAGS</Text>
 
@@ -158,8 +214,9 @@ export default function EditNoteModal({
               value={tags}
               onChangeText={setTags}
               placeholder="college, ideas, reading"
+              placeholderTextColor="#858585"
               autoCapitalize="none"
-              accessibilityLabel="Note tags"
+              accessibilityLabel="Item tags"
             />
 
             <Text style={styles.hint}>
@@ -176,10 +233,12 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+
   screen: {
     flex: 1,
     backgroundColor: '#FAFAF8',
   },
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -188,24 +247,29 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E0',
   },
+
   heading: {
     fontSize: 17,
     fontWeight: '600',
     color: '#202020',
   },
+
   cancel: {
     fontSize: 15,
     color: '#555555',
   },
+
   save: {
     fontSize: 15,
     fontWeight: '700',
     color: '#315C46',
   },
+
   form: {
     padding: 24,
     gap: 12,
   },
+
   label: {
     fontSize: 11,
     fontWeight: '700',
@@ -213,6 +277,7 @@ const styles = StyleSheet.create({
     color: '#555555',
     marginTop: 16,
   },
+
   input: {
     borderWidth: 1,
     borderColor: '#D5D5CF',
@@ -222,9 +287,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#202020',
   },
+
   textArea: {
     minHeight: 180,
   },
+
   hint: {
     fontSize: 12,
     color: '#666666',

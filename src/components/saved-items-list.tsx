@@ -1,8 +1,8 @@
-
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,8 +15,8 @@ import { useSQLiteContext } from 'expo-sqlite';
 import {
   archiveItem,
   getInboxItems,
-  type SavedItem,
   moveToRecentlyDeleted,
+  type SavedItem,
 } from '@/database/items';
 
 import { ItemActionsMenu } from '@/components/item-actions-menu';
@@ -33,12 +33,10 @@ export default function SavedItemsList({
   const db = useSQLiteContext();
   const isDark = useColorScheme() === 'dark';
 
-  // State for saved items, loading and errors
   const [items, setItems] = useState<SavedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // State for refreshing and archive operations
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
   const [busyItemId, setBusyItemId] = useState<number | null>(null);
 
@@ -46,8 +44,8 @@ export default function SavedItemsList({
   const secondaryColor = isDark ? '#B8B8B0' : '#606060';
   const borderColor = isDark ? '#464C46' : '#D8D8D0';
 
-  // Reload saved items whenever the Library screen gains focus
-  // or a refresh key changes.
+  // Reload Library whenever the screen gains focus
+  // or an item is created, edited, archived, or deleted.
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -85,7 +83,27 @@ export default function SavedItemsList({
     }, [db, refreshKey, localRefreshKey])
   );
 
-  // Archive a saved item in SQLite
+  // Tap a note to edit it.
+  // Tap a link to open its website.
+  async function handleCardPress(item: SavedItem) {
+    if (item.type === 'note') {
+      onSelectNote(item);
+      return;
+    }
+
+    if (item.type === 'link') {
+      try {
+        await Linking.openURL(item.content);
+      } catch {
+        Alert.alert(
+          'Could not open link',
+          'This website could not be opened.'
+        );
+      }
+    }
+  }
+
+  // Save the archived status to SQLite.
   async function confirmArchive(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -94,7 +112,7 @@ export default function SavedItemsList({
     try {
       await archiveItem(db, item.id);
 
-      // Refresh Library after successfully archiving
+      // Reload the Library after archiving.
       setLocalRefreshKey((current) => current + 1);
     } catch (err) {
       Alert.alert(
@@ -108,8 +126,10 @@ export default function SavedItemsList({
     }
   }
 
-  // Ask for confirmation before archiving
+  // Ask the user before archiving an item.
   function handleArchive(item: SavedItem) {
+    if (busyItemId !== null) return;
+
     Alert.alert(
       'Archive this item?',
       `"${item.title}" will move to your Archive. You can restore it later.`,
@@ -128,6 +148,7 @@ export default function SavedItemsList({
     );
   }
 
+  // Soft-delete the selected item.
   async function moveItemToTrash(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -136,7 +157,7 @@ export default function SavedItemsList({
     try {
       await moveToRecentlyDeleted(db, item.id);
 
-      // Reload the Library so the deleted item disappears.
+      // Remove the deleted item from Library.
       setLocalRefreshKey((current) => current + 1);
     } catch (err) {
       Alert.alert(
@@ -150,12 +171,18 @@ export default function SavedItemsList({
     }
   }
 
+  // Confirm before moving an item to Recently Deleted.
   function handleMoveToTrash(item: SavedItem) {
+    if (busyItemId !== null) return;
+
     Alert.alert(
       'Move to Recently Deleted?',
       'You can recover this item within 30 days. After that, it will be permanently deleted.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
         {
           text: 'Move to Trash',
           style: 'destructive',
@@ -166,7 +193,8 @@ export default function SavedItemsList({
       ]
     );
   }
-  // Loading state
+
+  // Loading state.
   if (loading) {
     return (
       <Text style={{ color: secondaryColor }}>
@@ -175,7 +203,7 @@ export default function SavedItemsList({
     );
   }
 
-  // Error state
+  // Error state.
   if (error) {
     return (
       <Text style={{ color: textColor }}>
@@ -184,11 +212,16 @@ export default function SavedItemsList({
     );
   }
 
-  // Empty Library state
+  // Empty Library state.
   if (items.length === 0) {
     return (
       <View style={[styles.emptyState, { borderColor }]}>
-        <Text style={[styles.itemTitle, { color: textColor }]}>
+        <Text
+          style={[
+            styles.itemTitle,
+            { color: textColor },
+          ]}
+        >
           Your library starts here
         </Text>
 
@@ -199,37 +232,66 @@ export default function SavedItemsList({
     );
   }
 
-  // Display saved items
+  // Display notes and links saved in SQLite.
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={styles.list}
     >
-      <Text style={[styles.count, { color: secondaryColor }]}>
+      <Text
+        style={[
+          styles.count,
+          { color: secondaryColor },
+        ]}
+      >
         {items.length} saved {items.length === 1 ? 'item' : 'items'}
       </Text>
 
       {items.map((item) => (
         <View
           key={item.id}
-          style={[styles.card, { borderColor }]}
+          style={[
+            styles.card,
+            { borderColor },
+          ]}
         >
-          {/* Tap a note to edit it */}
+          {/* Main card content */}
           <Pressable
             style={styles.cardContent}
-            onPress={() => onSelectNote(item)}
-            disabled={item.type !== 'note' || busyItemId !== null}
+            onPress={() => {
+              void handleCardPress(item);
+            }}
+            disabled={
+              item.type === 'image' || busyItemId !== null
+            }
             accessibilityRole="button"
-            accessibilityLabel={`Edit ${item.title}`}
+            accessibilityLabel={
+              item.type === 'link'
+                ? `Open ${item.title}`
+                : `Edit ${item.title}`
+            }
           >
-            <Text style={[styles.type, { color: secondaryColor }]}>
+            {/* Item type */}
+            <Text
+              style={[
+                styles.type,
+                { color: secondaryColor },
+              ]}
+            >
               {item.type.toUpperCase()}
             </Text>
 
-            <Text style={[styles.itemTitle, { color: textColor }]}>
+            {/* Item title */}
+            <Text
+              style={[
+                styles.itemTitle,
+                { color: textColor },
+              ]}
+            >
               {item.title}
             </Text>
 
+            {/* Note content or website URL */}
             {item.content ? (
               <Text
                 style={{
@@ -242,14 +304,22 @@ export default function SavedItemsList({
               </Text>
             ) : null}
 
+            {/* Item tags */}
             {item.tags.length > 0 ? (
-              <Text style={[styles.tags, { color: secondaryColor }]}>
-                {item.tags.map((tag) => `#${tag}`).join('  ')}
+              <Text
+                style={[
+                  styles.tags,
+                  { color: secondaryColor },
+                ]}
+              >
+                {item.tags
+                  .map((tag) => `#${tag}`)
+                  .join('  ')}
               </Text>
             ) : null}
           </Pressable>
 
-          {/* Archive action */}
+          {/* Floating three-dot menu */}
           <View style={styles.menuRow}>
             <ItemActionsMenu
               itemTitle={item.title}
@@ -271,7 +341,6 @@ export default function SavedItemsList({
               ]}
             />
           </View>
-
         </View>
       ))}
     </ScrollView>
@@ -295,12 +364,12 @@ const styles = StyleSheet.create({
   },
 
   card: {
+    position: 'relative',
     borderWidth: 1,
     borderRadius: 12,
     padding: 18,
-    gap: 12,
-    position: 'relative',
     paddingRight: 56,
+    gap: 12,
   },
 
   cardContent: {
@@ -323,18 +392,12 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
 
-  actions: {
-    borderTopWidth: 1,
-    paddingTop: 14,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-
-  archiveText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#A66A35',
-    paddingVertical: 6,
+  menuRow: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    zIndex: 10,
+    alignItems: 'flex-end',
   },
 
   emptyState: {
@@ -343,13 +406,5 @@ const styles = StyleSheet.create({
     padding: 24,
     marginTop: 32,
     gap: 10,
-  },
-
-  menuRow: {
-    position: 'absolute',
-    top: 10,
-    right: 12,
-    zIndex: 10,
-    alignItems: 'flex-end',
   },
 });

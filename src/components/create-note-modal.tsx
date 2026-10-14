@@ -15,16 +15,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import { createItem } from '@/database/items';
+import {
+  createItem,
+  type ItemType,
+} from '@/database/items';
 
 type Props = {
   visible: boolean;
+  itemType?: 'note' | 'link';
   onClose: () => void;
   onSaved: () => void;
 };
 
 export default function CreateNoteModal({
   visible,
+  itemType = 'note',
   onClose,
   onSaved,
 }: Props) {
@@ -35,13 +40,30 @@ export default function CreateNoteModal({
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const isLink = itemType === 'link';
+
+  function resetForm() {
+    setTitle('');
+    setContent('');
+    setTags('');
+  }
+
+  function handleClose() {
+    if (saving) return;
+
+    resetForm();
+    onClose();
+  }
+
   async function handleSave() {
     if (saving) return;
 
     if (!title.trim() || !content.trim()) {
       Alert.alert(
         'Missing information',
-        'Please enter a title and note content.'
+        isLink
+          ? 'Please enter a title and website URL.'
+          : 'Please enter a title and note content.'
       );
       return;
     }
@@ -50,21 +72,20 @@ export default function CreateNoteModal({
 
     try {
       await createItem(db, {
-        type: 'note',
+        type: itemType,
         title,
         content,
-        tags: tags.split(',').map(tag => tag.trim()),
+        tags: tags
+          .split(',')
+          .map((tag) => tag.trim()),
       });
 
-      setTitle('');
-      setContent('');
-      setTags('');
-
+      resetForm();
       onSaved();
       onClose();
     } catch (error) {
       Alert.alert(
-        'Could not save note',
+        isLink ? 'Could not save link' : 'Could not save note',
         error instanceof Error
           ? error.message
           : 'Something went wrong. Please try again.'
@@ -79,9 +100,7 @@ export default function CreateNoteModal({
       visible={visible}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={() => {
-        if (!saving) onClose();
-      }}
+      onRequestClose={handleClose}
     >
       <SafeAreaView style={styles.screen}>
         <KeyboardAvoidingView
@@ -89,13 +108,23 @@ export default function CreateNoteModal({
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <View style={styles.header}>
-            <Pressable onPress={onClose} disabled={saving}>
+            <Pressable
+              onPress={handleClose}
+              disabled={saving}
+              accessibilityRole="button"
+            >
               <Text style={styles.cancel}>Cancel</Text>
             </Pressable>
 
-            <Text style={styles.heading}>New note</Text>
+            <Text style={styles.heading}>
+              {isLink ? 'New link' : 'New note'}
+            </Text>
 
-            <Pressable onPress={handleSave} disabled={saving}>
+            <Pressable
+              onPress={() => void handleSave()}
+              disabled={saving}
+              accessibilityRole="button"
+            >
               <Text style={styles.save}>
                 {saving ? 'Saving...' : 'Save'}
               </Text>
@@ -107,29 +136,58 @@ export default function CreateNoteModal({
             keyboardShouldPersistTaps="handled"
           >
             <Text style={styles.label}>TITLE</Text>
+
             <TextInput
               style={styles.input}
               value={title}
               onChangeText={setTitle}
-              placeholder="Give your note a title"
+              placeholder={
+                isLink
+                  ? 'Give your link a title'
+                  : 'Give your note a title'
+              }
               placeholderTextColor="#858585"
               maxLength={150}
-              accessibilityLabel="Note title"
+              accessibilityLabel={
+                isLink ? 'Link title' : 'Note title'
+              }
             />
 
-            <Text style={styles.label}>YOUR NOTE</Text>
+            <Text style={styles.label}>
+              {isLink ? 'WEBSITE URL' : 'YOUR NOTE'}
+            </Text>
+
             <TextInput
-              style={[styles.input, styles.textArea]}
+              style={[
+                styles.input,
+                !isLink && styles.textArea,
+              ]}
               value={content}
               onChangeText={setContent}
-              placeholder="Write something worth keeping..."
+              placeholder={
+                isLink
+                  ? 'https://example.com'
+                  : 'Write something worth keeping...'
+              }
               placeholderTextColor="#858585"
-              multiline
-              textAlignVertical="top"
-              accessibilityLabel="Note content"
+              multiline={!isLink}
+              textAlignVertical={isLink ? undefined : 'top'}
+              keyboardType={isLink ? 'url' : 'default'}
+              autoCapitalize={isLink ? 'none' : 'sentences'}
+              autoCorrect={!isLink}
+              accessibilityLabel={
+                isLink ? 'Website URL' : 'Note content'
+              }
             />
 
+            {isLink && (
+              <Text style={styles.hint}>
+                You can also enter a domain like github.com.
+              </Text>
+            )}
+
             <Text style={styles.label}>TAGS</Text>
+
             <TextInput
               style={styles.input}
               value={tags}
@@ -137,7 +195,7 @@ export default function CreateNoteModal({
               placeholder="college, ideas, reading"
               placeholderTextColor="#858585"
               autoCapitalize="none"
-              accessibilityLabel="Note tags"
+              accessibilityLabel="Item tags"
             />
 
             <Text style={styles.hint}>
@@ -152,7 +210,12 @@ export default function CreateNoteModal({
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  screen: { flex: 1, backgroundColor: '#FAFAF8' },
+
+  screen: {
+    flex: 1,
+    backgroundColor: '#FAFAF8',
+  },
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -161,14 +224,29 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E0',
   },
+
   heading: {
     fontSize: 17,
     fontWeight: '600',
     color: '#202020',
   },
-  cancel: { fontSize: 15, color: '#555555' },
-  save: { fontSize: 15, fontWeight: '700', color: '#315C46' },
-  form: { padding: 24, gap: 12 },
+
+  cancel: {
+    fontSize: 15,
+    color: '#555555',
+  },
+
+  save: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#315C46',
+  },
+
+  form: {
+    padding: 24,
+    gap: 12,
+  },
+
   label: {
     fontSize: 11,
     fontWeight: '700',
@@ -176,6 +254,7 @@ const styles = StyleSheet.create({
     color: '#555555',
     marginTop: 16,
   },
+
   input: {
     borderWidth: 1,
     borderColor: '#D5D5CF',
@@ -185,6 +264,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#202020',
   },
-  textArea: { minHeight: 180 },
-  hint: { fontSize: 12, color: '#666666' },
+
+  textArea: {
+    minHeight: 180,
+  },
+
+  hint: {
+    fontSize: 12,
+    color: '#666666',
+  },
 });

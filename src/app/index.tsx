@@ -11,16 +11,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import CreateNoteModal from '@/components/create-note-modal';
+import EditNoteModal from '@/components/edit-note-modal';
 import SavedItemsList from '@/components/saved-items-list';
 
-import EditNoteModal from '@/components/edit-note-modal';
 import type { SavedItem } from '@/database/items';
 
 export default function HomeScreen() {
-  const scheme = useColorScheme();
-  const isDark = scheme === 'dark';
+  const isDark = useColorScheme() === 'dark';
 
-  // Colors for light and dark appearance
   const palette = {
     background: isDark ? '#171B18' : '#F7F4ED',
     text: isDark ? '#F7F4EE' : '#222A22',
@@ -28,23 +26,34 @@ export default function HomeScreen() {
     accent: isDark ? '#F0BE8C' : '#8A4B32',
   };
 
-  // Controls whether the Create Note modal is open
-  const [isNoteModalVisible, setIsNoteModalVisible] = useState(false);
+  // 'note' opens the Note form.
+  // 'link' opens the Link form.
+  // null means the creation form is closed.
+  const [creatingType, setCreatingType] =
+    useState<'note' | 'link' | null>(null);
 
-  // Used to refresh the library after saving a note
+  // Refresh Library after creating or editing an item.
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // The selected note for the editing modal.
   const [selectedNote, setSelectedNote] =
     useState<SavedItem | null>(null);
 
-  function handleNoteSaved() {
-    // Trigger SavedItemsList to fetch updated SQLite data
+  function handleItemSaved() {
     setRefreshKey((current) => current + 1);
 
+    const isLink = creatingType === 'link';
+
     Alert.alert(
-      'Note saved',
-      'Your note was saved successfully.'
+      isLink ? 'Link saved' : 'Note saved',
+      isLink
+        ? 'Your link was saved successfully.'
+        : 'Your note was saved successfully.'
     );
+  }
+
+  function handleNoteEdited() {
+    setRefreshKey((current) => current + 1);
   }
 
   return (
@@ -54,7 +63,7 @@ export default function HomeScreen() {
         { backgroundColor: palette.background },
       ]}
     >
-      {/* App branding */}
+      {/* Folio branding */}
       <View style={styles.header}>
         <Text
           style={[
@@ -82,7 +91,7 @@ export default function HomeScreen() {
         />
       </View>
 
-      {/* Library content */}
+      {/* Main Library */}
       <View style={styles.content}>
         <Text
           style={[
@@ -103,41 +112,61 @@ export default function HomeScreen() {
           you want to come back to.
         </Text>
 
-        {/* Open the Create Note form */}
-        <Pressable
-          style={styles.newNoteButton}
-          onPress={() => setIsNoteModalVisible(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Create a new note"
-        >
-          <Text style={styles.newNoteButtonText}>
-            + New Note
-          </Text>
-        </Pressable>
+        {/* Creation buttons */}
+        <View style={styles.createButtons}>
+          <Pressable
+            style={styles.newNoteButton}
+            onPress={() => setCreatingType('note')}
+            accessibilityRole="button"
+            accessibilityLabel="Create a new note"
+          >
+            <Text style={styles.newNoteButtonText}>
+              + New Note
+            </Text>
+          </Pressable>
 
-        {/* Display actual saved items from SQLite */}
+          <Pressable
+            style={[
+              styles.newLinkButton,
+              { borderColor: palette.secondary },
+            ]}
+            onPress={() => setCreatingType('link')}
+            accessibilityRole="button"
+            accessibilityLabel="Create a new link"
+          >
+            <Text
+              style={[
+                styles.newLinkButtonText,
+                { color: palette.text },
+              ]}
+            >
+              + New Link
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Notes and links saved in SQLite */}
         <SavedItemsList
           refreshKey={refreshKey}
           onSelectNote={setSelectedNote}
         />
       </View>
 
-      {/* Note creation form */}
+      {/* Reusable Note / Link creation modal */}
       <CreateNoteModal
-        visible={isNoteModalVisible}
-        onClose={() => setIsNoteModalVisible(false)}
-        onSaved={handleNoteSaved}
+        visible={creatingType !== null}
+        itemType={creatingType ?? 'note'}
+        onClose={() => setCreatingType(null)}
+        onSaved={handleItemSaved}
       />
 
+      {/* Existing note editing modal */}
       <EditNoteModal
         visible={selectedNote !== null}
         note={selectedNote}
         onClose={() => setSelectedNote(null)}
-        onSaved={() => {
-          setRefreshKey((current) => current + 1);
-        }}
+        onSaved={handleNoteEdited}
       />
-
     </SafeAreaView>
   );
 }
@@ -193,18 +222,40 @@ const styles = StyleSheet.create({
     maxWidth: 315,
   },
 
+  createButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 28,
+  },
+
   newNoteButton: {
+    flex: 1,
     backgroundColor: '#315C46',
     paddingVertical: 16,
-    paddingHorizontal: 24,
+    paddingHorizontal: 12,
     borderRadius: 12,
     alignItems: 'center',
-    marginTop: 28,
+    justifyContent: 'center',
   },
 
   newNoteButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  newLinkButton: {
+    flex: 1,
+    borderWidth: 1,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  newLinkButtonText: {
+    fontSize: 15,
     fontWeight: '600',
   },
 });
