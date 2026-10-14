@@ -12,15 +12,12 @@ import {
   View,
 } from 'react-native';
 import {
-  SafeAreaProvider,
-  SafeAreaView,
+  initialWindowMetrics,
+  useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 
-import {
-  createItem,
-  type ItemType,
-} from '@/database/items';
+import { createItem } from '@/database/items';
 
 type Props = {
   visible: boolean;
@@ -36,6 +33,19 @@ export default function CreateNoteModal({
   onSaved,
 }: Props) {
   const db = useSQLiteContext();
+
+  // Capture the main screen's safe area outside the Modal.
+  const insets = useSafeAreaInsets();
+
+  const safeTop = Math.max(
+    insets.top,
+    initialWindowMetrics?.insets.top ?? 0
+  );
+
+  const safeBottom = Math.max(
+    insets.bottom,
+    initialWindowMetrics?.insets.bottom ?? 0
+  );
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -79,7 +89,8 @@ export default function CreateNoteModal({
         content,
         tags: tags
           .split(',')
-          .map((tag) => tag.trim()),
+          .map((tag) => tag.trim())
+          .filter(Boolean),
       });
 
       resetForm();
@@ -104,10 +115,14 @@ export default function CreateNoteModal({
       presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
-    <SafeAreaProvider>
-      <SafeAreaView
-        edges={['top', 'bottom']}
-        style={styles.screen}
+      <View
+        style={[
+          styles.screen,
+          {
+            paddingTop: safeTop,
+            paddingBottom: safeBottom,
+          },
+        ]}
       >
         <KeyboardAvoidingView
           style={styles.flex}
@@ -115,9 +130,11 @@ export default function CreateNoteModal({
         >
           <View style={styles.header}>
             <Pressable
+              style={styles.headerAction}
               onPress={handleClose}
               disabled={saving}
               accessibilityRole="button"
+              accessibilityLabel="Cancel creation"
             >
               <Text style={styles.cancel}>Cancel</Text>
             </Pressable>
@@ -127,9 +144,14 @@ export default function CreateNoteModal({
             </Text>
 
             <Pressable
+              style={[
+                styles.headerAction,
+                styles.headerActionRight,
+              ]}
               onPress={() => void handleSave()}
               disabled={saving}
               accessibilityRole="button"
+              accessibilityLabel="Save item"
             >
               <Text style={styles.save}>
                 {saving ? 'Saving...' : 'Save'}
@@ -140,6 +162,7 @@ export default function CreateNoteModal({
           <ScrollView
             contentContainerStyle={styles.form}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
           >
             <Text style={styles.label}>TITLE</Text>
 
@@ -209,14 +232,15 @@ export default function CreateNoteModal({
             </Text>
           </ScrollView>
         </KeyboardAvoidingView>
-      </SafeAreaView>
-    </SafeAreaProvider>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
+  flex: {
+    flex: 1,
+  },
 
   screen: {
     flex: 1,
@@ -227,15 +251,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E0',
+    minHeight: 64,
+  },
+
+  headerAction: {
+    minWidth: 72,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+
+  headerActionRight: {
+    alignItems: 'flex-end',
   },
 
   heading: {
     fontSize: 17,
     fontWeight: '600',
     color: '#202020',
+    textAlign: 'center',
   },
 
   cancel: {
@@ -252,6 +289,7 @@ const styles = StyleSheet.create({
   form: {
     padding: 24,
     gap: 12,
+    paddingBottom: 48,
   },
 
   label: {

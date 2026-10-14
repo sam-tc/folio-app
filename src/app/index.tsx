@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useColorScheme,
 } from 'react-native';
@@ -17,6 +18,18 @@ import ImageViewerModal from '@/components/image-viewer-modal';
 import SavedItemsList from '@/components/saved-items-list';
 
 import type { SavedItem } from '@/database/items';
+import type { LibraryFilter } from '@/database/search';
+
+const FILTER_OPTIONS: {
+  label: string;
+  value: LibraryFilter;
+}[] = [
+  { label: 'All', value: 'all' },
+  { label: 'Notes', value: 'note' },
+  { label: 'Links', value: 'link' },
+  { label: 'Images', value: 'image' },
+  { label: 'Tagged', value: 'tagged' },
+];
 
 export default function HomeScreen() {
   const isDark = useColorScheme() === 'dark';
@@ -26,6 +39,9 @@ export default function HomeScreen() {
     text: isDark ? '#F7F4EE' : '#222A22',
     secondary: isDark ? '#C3CBC1' : '#526457',
     accent: isDark ? '#F0BE8C' : '#8A4B32',
+    searchBackground: isDark ? '#252D27' : '#FFFFFF',
+    border: isDark ? '#48594D' : '#D3DBD0',
+    placeholder: isDark ? '#8E9B91' : '#89958A',
   };
 
   const [creatingType, setCreatingType] =
@@ -41,6 +57,21 @@ export default function HomeScreen() {
 
   const [selectedImageItem, setSelectedImageItem] =
     useState<SavedItem | null>(null);
+
+  // Search and filter state.
+  const [searchText, setSearchText] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selectedFilter, setSelectedFilter] =
+    useState<LibraryFilter>('all');
+
+  // Wait briefly while typing before querying SQLite.
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedSearch(searchText);
+    }, 180);
+
+    return () => clearTimeout(timeout);
+  }, [searchText]);
 
   function handleItemSaved() {
     setRefreshKey((current) => current + 1);
@@ -75,7 +106,7 @@ export default function HomeScreen() {
         { backgroundColor: palette.background },
       ]}
     >
-      {/* Fixed Folio branding */}
+      {/* Fixed branding header */}
       <View style={styles.header}>
         <Text
           style={[
@@ -103,12 +134,13 @@ export default function HomeScreen() {
         />
       </View>
 
-      {/* Scrollable Home content */}
+      {/* The content below the branding scrolls together */}
       <ScrollView
         style={styles.scrollArea}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <Text
           style={[
@@ -182,9 +214,122 @@ export default function HomeScreen() {
           </Text>
         </Pressable>
 
-        {/* Saved Library */}
+        {/* Search controls */}
+        <View style={styles.searchSection}>
+          <Text
+            style={[
+              styles.searchLabel,
+              { color: palette.secondary },
+            ]}
+          >
+            EXPLORE YOUR LIBRARY
+          </Text>
+
+          <View
+            style={[
+              styles.searchBox,
+              {
+                backgroundColor: palette.searchBackground,
+                borderColor: palette.border,
+              },
+            ]}
+          >
+            <TextInput
+              style={[
+                styles.searchInput,
+                { color: palette.text },
+              ]}
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder="Search notes, links, images, tags..."
+              placeholderTextColor={palette.placeholder}
+              returnKeyType="search"
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Search your library"
+            />
+
+            {searchText.length > 0 && (
+              <Pressable
+                style={styles.clearButton}
+                onPress={() => {
+                  setSearchText('');
+                  setDebouncedSearch('');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+                hitSlop={8}
+              >
+                <Text
+                  style={[
+                    styles.clearText,
+                    { color: palette.secondary },
+                  ]}
+                >
+                  ×
+                </Text>
+              </Pressable>
+            )}
+          </View>
+
+          {/* Filter chips scroll horizontally */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.filterRow}
+            style={styles.filterScroll}
+          >
+            {FILTER_OPTIONS.map((option) => {
+              const isSelected =
+                selectedFilter === option.value;
+
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor: isSelected
+                        ? '#315C46'
+                        : 'transparent',
+                      borderColor: isSelected
+                        ? '#315C46'
+                        : palette.border,
+                    },
+                  ]}
+                  onPress={() => {
+                    setSelectedFilter(option.value);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    selected: isSelected,
+                  }}
+                  accessibilityLabel={`Filter by ${option.label}`}
+                >
+                  <Text
+                    style={[
+                      styles.filterText,
+                      {
+                        color: isSelected
+                          ? '#FFFFFF'
+                          : palette.secondary,
+                      },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Searchable saved items */}
         <SavedItemsList
           refreshKey={refreshKey}
+          searchQuery={debouncedSearch}
+          filter={selectedFilter}
           onSelectNote={setSelectedNote}
           onSelectImage={setSelectedImageItem}
         />
@@ -213,7 +358,7 @@ export default function HomeScreen() {
         onSaved={handleNoteEdited}
       />
 
-      {/* Full-screen Image Viewer */}
+      {/* View saved image */}
       <ImageViewerModal
         image={selectedImageItem}
         onClose={() => setSelectedImageItem(null)}
@@ -326,6 +471,71 @@ const styles = StyleSheet.create({
 
   newImageButtonText: {
     fontSize: 15,
+    fontWeight: '600',
+  },
+
+  searchSection: {
+    marginTop: 34,
+  },
+
+  searchLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    marginBottom: 14,
+  },
+
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    minHeight: 54,
+  },
+
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 14,
+  },
+
+  clearButton: {
+    minWidth: 30,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+  },
+
+  clearText: {
+    fontSize: 26,
+    lineHeight: 30,
+    fontWeight: '300',
+  },
+
+  filterScroll: {
+    marginTop: 15,
+  },
+
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingRight: 12,
+  },
+
+  filterChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  filterText: {
+    fontSize: 13,
     fontWeight: '600',
   },
 });

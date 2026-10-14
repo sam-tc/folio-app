@@ -12,8 +12,8 @@ import {
   View,
 } from 'react-native';
 import {
-  SafeAreaProvider,
-  SafeAreaView,
+  initialWindowMetrics,
+  useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 
@@ -38,6 +38,19 @@ export default function EditNoteModal({
 }: Props) {
   const db = useSQLiteContext();
 
+  // Read the safe area from the main app, outside the Modal.
+  const insets = useSafeAreaInsets();
+
+  const safeTop = Math.max(
+    insets.top,
+    initialWindowMetrics?.insets.top ?? 0
+  );
+
+  const safeBottom = Math.max(
+    insets.bottom,
+    initialWindowMetrics?.insets.bottom ?? 0
+  );
+
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [tags, setTags] = useState('');
@@ -45,7 +58,6 @@ export default function EditNoteModal({
 
   const isLink = note?.type === 'link';
 
-  // Populate the form with the selected item's saved data.
   useEffect(() => {
     if (visible && note) {
       setTitle(note.title);
@@ -54,21 +66,20 @@ export default function EditNoteModal({
     }
   }, [visible, note]);
 
+  function handleClose() {
+    if (saving) return;
+    onClose();
+  }
+
   async function handleSave() {
     if (!note || saving) return;
-
-    // This modal currently supports notes and links only.
-    if (note.type !== 'note' && note.type !== 'link') {
-      Alert.alert('Unsupported item', 'This item cannot be edited yet.');
-      return;
-    }
 
     if (!title.trim() || !content.trim()) {
       Alert.alert(
         'Missing information',
         isLink
           ? 'Please enter a title and website URL.'
-          : 'Please enter a title and note content.'
+          : 'Title and content cannot be empty.'
       );
       return;
     }
@@ -76,28 +87,30 @@ export default function EditNoteModal({
     setSaving(true);
 
     try {
-      const parsedTags = tags
+      const cleanTags = tags
         .split(',')
         .map((tag) => tag.trim())
         .filter(Boolean);
 
       if (note.type === 'link') {
-        // Update an existing link.
         await updateLink(
           db,
           note.id,
           title,
           content,
-          parsedTags
+          cleanTags
         );
-      } else {
-        // Update an existing note.
+      } else if (note.type === 'note') {
         await updateNote(
           db,
           note.id,
           title,
           content,
-          parsedTags
+          cleanTags
+        );
+      } else {
+        throw new Error(
+          'This item cannot be edited using the note editor.'
         );
       }
 
@@ -115,12 +128,6 @@ export default function EditNoteModal({
     }
   }
 
-  function handleClose() {
-    if (saving) return;
-
-    onClose();
-  }
-
   return (
     <Modal
       visible={visible && note !== null}
@@ -128,14 +135,22 @@ export default function EditNoteModal({
       presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
-      <SafeAreaView style={styles.screen}>
+      <View
+        style={[
+          styles.screen,
+          {
+            paddingTop: safeTop,
+            paddingBottom: safeBottom,
+          },
+        ]}
+      >
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          {/* Header */}
           <View style={styles.header}>
             <Pressable
+              style={styles.headerAction}
               onPress={handleClose}
               disabled={saving}
               accessibilityRole="button"
@@ -149,6 +164,10 @@ export default function EditNoteModal({
             </Text>
 
             <Pressable
+              style={[
+                styles.headerAction,
+                styles.headerActionRight,
+              ]}
               onPress={() => void handleSave()}
               disabled={saving}
               accessibilityRole="button"
@@ -160,10 +179,10 @@ export default function EditNoteModal({
             </Pressable>
           </View>
 
-          {/* Edit form */}
           <ScrollView
             contentContainerStyle={styles.form}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
           >
             <Text style={styles.label}>TITLE</Text>
 
@@ -206,7 +225,7 @@ export default function EditNoteModal({
 
             {isLink && (
               <Text style={styles.hint}>
-                Enter a full URL or a domain like github.com.
+                You can also enter a domain like github.com.
               </Text>
             )}
 
@@ -227,7 +246,7 @@ export default function EditNoteModal({
             </Text>
           </ScrollView>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -246,15 +265,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5E0',
+    minHeight: 64,
+  },
+
+  headerAction: {
+    minWidth: 72,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+
+  headerActionRight: {
+    alignItems: 'flex-end',
   },
 
   heading: {
     fontSize: 17,
     fontWeight: '600',
     color: '#202020',
+    textAlign: 'center',
   },
 
   cancel: {
@@ -271,6 +303,7 @@ const styles = StyleSheet.create({
   form: {
     padding: 24,
     gap: 12,
+    paddingBottom: 48,
   },
 
   label: {

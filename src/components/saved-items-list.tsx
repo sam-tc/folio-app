@@ -14,21 +14,29 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import {
   archiveItem,
-  getInboxItems,
   moveToRecentlyDeleted,
   type SavedItem,
 } from '@/database/items';
+
+import {
+  searchLibraryItems,
+  type LibraryFilter,
+} from '@/database/search';
 
 import { ItemActionsMenu } from '@/components/item-actions-menu';
 
 type Props = {
   refreshKey: number;
+  searchQuery: string;
+  filter: LibraryFilter;
   onSelectNote: (item: SavedItem) => void;
   onSelectImage: (item: SavedItem) => void;
 };
 
 export default function SavedItemsList({
   refreshKey,
+  searchQuery,
+  filter,
   onSelectNote,
   onSelectImage,
 }: Props) {
@@ -36,55 +44,68 @@ export default function SavedItemsList({
   const isDark = useColorScheme() === 'dark';
 
   const [items, setItems] = useState<SavedItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
   const [busyItemId, setBusyItemId] = useState<number | null>(null);
 
-  const textColor = isDark ? '#F5F5F0' : '#202020';
-  const secondaryColor = isDark ? '#B8B8B0' : '#606060';
-  const borderColor = isDark ? '#464C46' : '#D8D8D0';
+  const textColor = isDark ? '#F5F5F0' : '#222A22';
+  const secondaryColor = isDark ? '#C3CBC1' : '#526457';
+  const borderColor = isDark ? '#48594D' : '#D3DBD0';
 
-  // Refresh Library when screen gains focus or items change.
+  const hasActiveSearch = searchQuery.trim().length > 0;
+  const hasActiveFilter = filter !== 'all';
+  const isSearching = hasActiveSearch || hasActiveFilter;
+
+  // Reload whenever the screen is focused, something
+  // changes, or a search/filter is updated.
   useFocusEffect(
     useCallback(() => {
       let active = true;
 
       async function loadItems() {
-        setLoading(true);
-
         try {
-          const savedItems = await getInboxItems(db);
+          const results = await searchLibraryItems(
+            db,
+            searchQuery,
+            filter
+          );
 
           if (active) {
-            setItems(savedItems);
+            setItems(results);
             setError(null);
+            setHasLoaded(true);
           }
         } catch (err) {
           if (active) {
             setError(
               err instanceof Error
                 ? err.message
-                : 'Failed to load items.'
+                : 'Failed to search your library.'
             );
-          }
-        } finally {
-          if (active) {
-            setLoading(false);
+
+            setHasLoaded(true);
           }
         }
       }
 
       void loadItems();
 
+      // Ignore results from searches that are no longer active.
       return () => {
         active = false;
       };
-    }, [db, refreshKey, localRefreshKey])
+    }, [
+      db,
+      refreshKey,
+      localRefreshKey,
+      searchQuery,
+      filter,
+    ])
   );
 
-  // Decide what happens when each item card is tapped.
+  // Handle tapping a saved item.
   async function handleCardPress(item: SavedItem) {
     if (item.type === 'note') {
       onSelectNote(item);
@@ -108,7 +129,7 @@ export default function SavedItemsList({
     }
   }
 
-  // Move an item from Library to Archive.
+  // Archive an item.
   async function confirmArchive(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -130,13 +151,12 @@ export default function SavedItemsList({
     }
   }
 
-  // Ask for confirmation before archiving.
   function handleArchive(item: SavedItem) {
     if (busyItemId !== null) return;
 
     Alert.alert(
       'Archive this item?',
-      `"${item.title}" will move to your Archive. You can restore it later.`,
+      `"${item.title}" will move to Archive. You can restore it later.`,
       [
         {
           text: 'Cancel',
@@ -174,7 +194,6 @@ export default function SavedItemsList({
     }
   }
 
-  // Ask for confirmation before moving to Recently Deleted.
   function handleMoveToTrash(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -197,7 +216,8 @@ export default function SavedItemsList({
     );
   }
 
-  if (loading) {
+  // Initial loading state.
+  if (!hasLoaded) {
     return (
       <Text
         style={[
@@ -210,19 +230,27 @@ export default function SavedItemsList({
     );
   }
 
+  // Database error state.
   if (error) {
     return (
-      <Text
-        style={[
-          styles.statusText,
-          { color: textColor },
-        ]}
-      >
-        Error: {error}
-      </Text>
+      <View style={styles.messageContainer}>
+        <Text
+          style={[
+            styles.itemTitle,
+            { color: textColor },
+          ]}
+        >
+          Couldn't load your library
+        </Text>
+
+        <Text style={{ color: secondaryColor }}>
+          {error}
+        </Text>
+      </View>
     );
   }
 
+  // Empty Library or no matching search results.
   if (items.length === 0) {
     return (
       <View
@@ -237,17 +265,25 @@ export default function SavedItemsList({
             { color: textColor },
           ]}
         >
-          Your library starts here
+          {isSearching
+            ? 'No matching items'
+            : 'Your library starts here'}
         </Text>
 
-        <Text style={{ color: secondaryColor }}>
-          Nothing saved yet. Your collection will appear here.
+        <Text
+          style={[
+            styles.emptyDescription,
+            { color: secondaryColor },
+          ]}
+        >
+          {isSearching
+            ? 'Try a different search or select another filter.'
+            : 'Nothing saved yet. Your collection will appear here.'}
         </Text>
       </View>
     );
   }
 
-  // The parent Home ScrollView handles all scrolling.
   return (
     <View style={styles.list}>
       <Text
@@ -256,7 +292,13 @@ export default function SavedItemsList({
           { color: secondaryColor },
         ]}
       >
-        {items.length} saved {items.length === 1 ? 'item' : 'items'}
+        {isSearching
+          ? `${items.length} ${
+              items.length === 1 ? 'result' : 'results'
+            } found`
+          : `${items.length} saved ${
+              items.length === 1 ? 'item' : 'items'
+            }`}
       </Text>
 
       {items.map((item) => (
@@ -267,7 +309,7 @@ export default function SavedItemsList({
             { borderColor },
           ]}
         >
-          {/* Main card content */}
+          {/* Saved item content */}
           <Pressable
             style={styles.cardContent}
             onPress={() => {
@@ -301,7 +343,7 @@ export default function SavedItemsList({
               {item.title}
             </Text>
 
-            {/* Saved image preview */}
+            {/* Image thumbnail */}
             {item.type === 'image' && item.image_uri && (
               <Image
                 source={{ uri: item.image_uri }}
@@ -311,7 +353,7 @@ export default function SavedItemsList({
               />
             )}
 
-            {/* Note, link or image description */}
+            {/* Note content, URL or image description */}
             {item.content ? (
               <Text
                 style={[
@@ -339,13 +381,14 @@ export default function SavedItemsList({
             ) : null}
           </Pressable>
 
-          {/* Three-dot menu */}
+          {/* Existing three-dot action menu */}
           <View style={styles.menuRow}>
             <ItemActionsMenu
               itemTitle={item.title}
               disabled={busyItemId !== null}
               actions={[
-                ...(item.type === 'note' || item.type === 'link'
+                ...(item.type === 'note' ||
+                item.type === 'link'
                   ? [
                       {
                         label: 'Edit',
@@ -376,8 +419,13 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
 
-  list: {
+  messageContainer: {
     marginTop: 32,
+    gap: 10,
+  },
+
+  list: {
+    marginTop: 28,
     gap: 12,
   },
 
@@ -411,6 +459,7 @@ const styles = StyleSheet.create({
   },
 
   itemContent: {
+    fontSize: 14,
     lineHeight: 21,
   },
 
@@ -439,7 +488,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 24,
-    marginTop: 32,
+    marginTop: 28,
     gap: 10,
+  },
+
+  emptyDescription: {
+    fontSize: 14,
+    lineHeight: 21,
   },
 });
