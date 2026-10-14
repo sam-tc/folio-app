@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,19 +17,30 @@ import CreateImageModal from '@/components/create-image-modal';
 import EditNoteModal from '@/components/edit-note-modal';
 import ImageViewerModal from '@/components/image-viewer-modal';
 import SavedItemsList from '@/components/saved-items-list';
+import SettingsModal from '@/components/settings-modal';
 
 import type { SavedItem } from '@/database/items';
 import type { LibraryFilter } from '@/database/search';
 
-const FILTER_OPTIONS: {
-  label: string;
-  value: LibraryFilter;
-}[] = [
+const FILTER_OPTIONS: { label: string; value: LibraryFilter }[] = [
   { label: 'All', value: 'all' },
   { label: 'Notes', value: 'note' },
   { label: 'Links', value: 'link' },
   { label: 'Images', value: 'image' },
   { label: 'Tagged', value: 'tagged' },
+];
+
+type NewItemType = 'note' | 'link' | 'image';
+
+const NEW_ITEM_OPTIONS: {
+  type: NewItemType;
+  number: string;
+  title: string;
+  description: string;
+}[] = [
+  { type: 'note', number: '01', title: 'Note', description: 'Keep a thought or idea' },
+  { type: 'link', number: '02', title: 'Link', description: 'Save a page for later' },
+  { type: 'image', number: '03', title: 'Image', description: 'Keep a visual reference' },
 ];
 
 export default function HomeScreen() {
@@ -37,28 +49,25 @@ export default function HomeScreen() {
   const palette = {
     background: isDark ? '#171B18' : '#F7F4ED',
     text: isDark ? '#F7F4EE' : '#222A22',
-    secondary: isDark ? '#C3CBC1' : '#526457',
-    accent: isDark ? '#F0BE8C' : '#8A4B32',
-    searchBackground: isDark ? '#252D27' : '#FFFFFF',
-    border: isDark ? '#48594D' : '#D3DBD0',
+    secondary: isDark ? '#B9C4B9' : '#526457',
+    muted: isDark ? '#92A092' : '#748173',
+    accent: isDark ? '#E6BA8A' : '#936D47',
+    border: isDark ? '#3E4C41' : '#D6DED2',
+    surface: isDark ? '#222A24' : '#FFFEFA',
+    primary: isDark ? '#476F55' : '#315C46',
     placeholder: isDark ? '#8E9B91' : '#89958A',
   };
 
   const [creatingType, setCreatingType] =
     useState<'note' | 'link' | null>(null);
-
-  const [isImageModalVisible, setIsImageModalVisible] =
-    useState(false);
-
+  const [isImageModalVisible, setIsImageModalVisible] = useState(false);
+  const [addExpanded, setAddExpanded] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-
-  const [selectedNote, setSelectedNote] =
-    useState<SavedItem | null>(null);
-
+  const [selectedNote, setSelectedNote] = useState<SavedItem | null>(null);
   const [selectedImageItem, setSelectedImageItem] =
     useState<SavedItem | null>(null);
 
-  // Search and filter state.
   const [searchText, setSearchText] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedFilter, setSelectedFilter] =
@@ -68,26 +77,29 @@ export default function HomeScreen() {
   const hasSearchCriteria =
     searchText.trim().length > 0 || selectedFilter !== 'all';
 
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedSearch(searchText), 180);
+    return () => clearTimeout(timeout);
+  }, [searchText]);
+
   function clearSearch() {
     setSearchText('');
     setDebouncedSearch('');
     setSelectedFilter('all');
   }
 
-  // Wait briefly while typing before querying SQLite.
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setDebouncedSearch(searchText);
-    }, 180);
-
-    return () => clearTimeout(timeout);
-  }, [searchText]);
+  function startCreating(type: NewItemType) {
+    setAddExpanded(false);
+    if (type === 'image') {
+      setIsImageModalVisible(true);
+    } else {
+      setCreatingType(type);
+    }
+  }
 
   function handleItemSaved() {
-    setRefreshKey((current) => current + 1);
-
+    setRefreshKey((value) => value + 1);
     const isLink = creatingType === 'link';
-
     Alert.alert(
       isLink ? 'Link saved' : 'Note saved',
       isLink
@@ -97,54 +109,39 @@ export default function HomeScreen() {
   }
 
   function handleImageSaved() {
-    setRefreshKey((current) => current + 1);
-
-    Alert.alert(
-      'Image saved',
-      'Your image has been added to Folio.'
-    );
+    setRefreshKey((value) => value + 1);
+    Alert.alert('Image saved', 'Your image has been added to Folio.');
   }
 
   function handleNoteEdited() {
-    setRefreshKey((current) => current + 1);
+    setRefreshKey((value) => value + 1);
   }
 
   return (
     <SafeAreaView
-      style={[
-        styles.container,
-        { backgroundColor: palette.background },
-      ]}
+      style={[styles.container, { backgroundColor: palette.background }]}
     >
-      {/* Fixed branding header */}
+      {/* Keep the Folio identity visible while the Library scrolls. */}
       <View style={styles.header}>
-        <Text
-          style={[
-            styles.wordmark,
-            { color: palette.text },
+        <View style={styles.headerIdentity}>
+          <Text style={[styles.wordmark, { color: palette.text }]}>folio.</Text>
+          <Text style={[styles.headerCaption, { color: palette.accent }]}>
+            YOUR PERSONAL LIBRARY
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => setSettingsVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Open Folio Settings"
+          style={({ pressed }) => [
+            styles.settingsButton,
+            { borderColor: palette.border, backgroundColor: palette.surface, opacity: pressed ? 0.6 : 1 },
           ]}
         >
-          folio.
-        </Text>
-
-        <Text
-          style={[
-            styles.eyebrow,
-            { color: palette.accent },
-          ]}
-        >
-          YOUR PERSONAL LIBRARY
-        </Text>
-
-        <View
-          style={[
-            styles.accentRule,
-            { backgroundColor: palette.accent },
-          ]}
-        />
+          <Text style={[styles.settingsGlyph, { color: palette.text }]}>Settings</Text>
+        </Pressable>
       </View>
 
-      {/* The content below the branding scrolls together */}
       <ScrollView
         style={styles.scrollArea}
         contentContainerStyle={styles.scrollContent}
@@ -152,112 +149,99 @@ export default function HomeScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        <Text
-          style={[
-            styles.heading,
-            { color: palette.text },
-          ]}
-        >
-          Good things are worth keeping.
-        </Text>
-
-        <Text
-          style={[
-            styles.description,
-            { color: palette.secondary },
-          ]}
-        >
-          A quiet home for the notes, links, images, and ideas
-          you want to come back to.
-        </Text>
-
-        {/* Create Note and Link */}
-        <View style={styles.createButtons}>
-          <Pressable
-            style={styles.newNoteButton}
-            onPress={() => setCreatingType('note')}
-            accessibilityRole="button"
-            accessibilityLabel="Create a new note"
-          >
-            <Text style={styles.newNoteButtonText}>
-              + New Note
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[
-              styles.newLinkButton,
-              { borderColor: palette.secondary },
-            ]}
-            onPress={() => setCreatingType('link')}
-            accessibilityRole="button"
-            accessibilityLabel="Create a new link"
-          >
-            <Text
-              style={[
-                styles.newLinkButtonText,
-                { color: palette.text },
-              ]}
-            >
-              + New Link
-            </Text>
-          </Pressable>
+        {/* A short welcome leaves room to see real saved items sooner. */}
+        <View style={styles.intro}>
+          <Text style={[styles.heading, { color: palette.text }]}>
+            Worth keeping.
+          </Text>
+          <Text style={[styles.description, { color: palette.secondary }]}>
+            A home for the things you want to come back to.
+          </Text>
         </View>
 
-        {/* Create Image */}
+        {/* One intentional creation action replaces three large buttons. */}
         <Pressable
-          style={[
-            styles.newImageButton,
-            { borderColor: palette.secondary },
+          onPress={() => setAddExpanded((value) => !value)}
+          style={({ pressed }) => [
+            styles.addButton,
+            { backgroundColor: palette.primary, opacity: pressed ? 0.85 : 1 },
           ]}
-          onPress={() => setIsImageModalVisible(true)}
           accessibilityRole="button"
-          accessibilityLabel="Create a new image"
+          accessibilityLabel={
+            addExpanded ? 'Close Add to Folio menu' : 'Open Add to Folio menu'
+          }
+          accessibilityState={{ expanded: addExpanded }}
         >
-          <Text
-            style={[
-              styles.newImageButtonText,
-              { color: palette.text },
-            ]}
-          >
-            + New Image
+          <Text style={styles.addButtonText}>
+            {addExpanded ? 'Choose what to save' : 'Add to Folio'}
+          </Text>
+          <Text style={styles.addButtonGlyph} accessibilityElementsHidden>
+            {addExpanded ? '×' : '+'}
           </Text>
         </Pressable>
 
-        {/* A quiet, collapsible search area. Active filters stay
-            in effect when the controls are collapsed. */}
-        <View style={styles.searchSection}>
-          <View style={styles.searchHeadingRow}>
-            <View style={styles.searchHeadingText}>
-              <Text
-                style={[
-                  styles.searchLabel,
-                  { color: palette.secondary },
+        {addExpanded && (
+          <View
+            style={[
+              styles.addMenu,
+              { backgroundColor: palette.surface, borderColor: palette.border },
+            ]}
+          >
+            {NEW_ITEM_OPTIONS.map((option, index) => (
+              <Pressable
+                key={option.type}
+                onPress={() => startCreating(option.type)}
+                style={({ pressed }) => [
+                  styles.addMenuOption,
+                  index > 0 && {
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: palette.border,
+                  },
+                  { opacity: pressed ? 0.65 : 1 },
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Create a new ${option.title.toLowerCase()}`}
               >
-                YOUR COLLECTION
+                <Text style={[styles.addMenuNumber, { color: palette.accent }]}>
+                  {option.number}
+                </Text>
+                <View style={styles.addMenuCopy}>
+                  <Text style={[styles.addMenuTitle, { color: palette.text }]}>
+                    {option.title}
+                  </Text>
+                  <Text
+                    style={[styles.addMenuDescription, { color: palette.secondary }]}
+                  >
+                    {option.description}
+                  </Text>
+                </View>
+                <Text style={[styles.addMenuArrow, { color: palette.secondary }]}>
+                  ↗
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* Search stays compact unless someone actually needs it. */}
+        <View style={styles.collectionSection}>
+          <View style={styles.collectionHeadingRow}>
+            <View style={styles.collectionHeadingCopy}>
+              <Text style={[styles.collectionLabel, { color: palette.accent }]}>
+                THE LIBRARY
               </Text>
-              <Text
-                style={[
-                  styles.searchHint,
-                  { color: palette.secondary },
-                ]}
-              >
-                {hasSearchCriteria
-                  ? 'Showing your selected results'
-                  : 'Everything you have kept, in one place'}
+              <Text style={[styles.collectionTitle, { color: palette.text }]}>
+                Your collection
               </Text>
             </View>
-
             <Pressable
               onPress={() => setSearchExpanded((value) => !value)}
-              style={[
+              style={({ pressed }) => [
                 styles.searchToggle,
                 {
                   borderColor: palette.border,
-                  backgroundColor: searchExpanded
-                    ? '#315C46'
-                    : palette.searchBackground,
+                  backgroundColor: searchExpanded ? palette.primary : palette.surface,
+                  opacity: pressed ? 0.75 : 1,
                 },
               ]}
               accessibilityRole="button"
@@ -282,7 +266,6 @@ export default function HomeScreen() {
                   { color: searchExpanded ? '#FFFFFF' : palette.text },
                 ]}
                 accessibilityElementsHidden
-                importantForAccessibility="no"
               >
                 {searchExpanded ? '−' : '+'}
               </Text>
@@ -292,15 +275,10 @@ export default function HomeScreen() {
           {hasSearchCriteria && (
             <View style={styles.activeSearchRow}>
               <Text
-                style={[
-                  styles.activeSearchText,
-                  { color: palette.secondary },
-                ]}
+                style={[styles.activeSearchText, { color: palette.secondary }]}
                 numberOfLines={1}
               >
-                {searchText.trim()
-                  ? `“${searchText.trim()}”`
-                  : 'All items'}
+                {searchText.trim() ? `“${searchText.trim()}”` : 'All items'}
                 {selectedFilter !== 'all'
                   ? ` · ${FILTER_OPTIONS.find(
                       (option) => option.value === selectedFilter
@@ -313,7 +291,9 @@ export default function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Clear search and filters"
               >
-                <Text style={styles.resetText}>Clear all</Text>
+                <Text style={[styles.resetText, { color: palette.accent }]}>
+                  Clear all
+                </Text>
               </Pressable>
             </View>
           )}
@@ -323,17 +303,11 @@ export default function HomeScreen() {
               <View
                 style={[
                   styles.searchBox,
-                  {
-                    backgroundColor: palette.searchBackground,
-                    borderColor: palette.border,
-                  },
+                  { backgroundColor: palette.surface, borderColor: palette.border },
                 ]}
               >
                 <TextInput
-                  style={[
-                    styles.searchInput,
-                    { color: palette.text },
-                  ]}
+                  style={[styles.searchInput, { color: palette.text }]}
                   value={searchText}
                   onChangeText={setSearchText}
                   placeholder="Title, text, URL or tag"
@@ -345,21 +319,16 @@ export default function HomeScreen() {
                 />
                 {searchText.length > 0 && (
                   <Pressable
-                    style={styles.clearButton}
                     onPress={() => {
                       setSearchText('');
                       setDebouncedSearch('');
                     }}
+                    style={styles.clearButton}
                     accessibilityRole="button"
                     accessibilityLabel="Clear search text"
                     hitSlop={8}
                   >
-                    <Text
-                      style={[
-                        styles.clearText,
-                        { color: palette.secondary },
-                      ]}
-                    >
+                    <Text style={[styles.clearText, { color: palette.secondary }]}>
                       ×
                     </Text>
                   </Pressable>
@@ -374,35 +343,26 @@ export default function HomeScreen() {
                 style={styles.filterScroll}
               >
                 {FILTER_OPTIONS.map((option) => {
-                  const isSelected = selectedFilter === option.value;
-
+                  const selected = selectedFilter === option.value;
                   return (
                     <Pressable
                       key={option.value}
+                      onPress={() => setSelectedFilter(option.value)}
                       style={[
                         styles.filterChip,
                         {
-                          backgroundColor: isSelected
-                            ? '#315C46'
-                            : 'transparent',
-                          borderColor: isSelected
-                            ? '#315C46'
-                            : palette.border,
+                          backgroundColor: selected ? palette.primary : 'transparent',
+                          borderColor: selected ? palette.primary : palette.border,
                         },
                       ]}
-                      onPress={() => setSelectedFilter(option.value)}
                       accessibilityRole="button"
-                      accessibilityState={{ selected: isSelected }}
+                      accessibilityState={{ selected }}
                       accessibilityLabel={`Filter by ${option.label}`}
                     >
                       <Text
                         style={[
                           styles.filterText,
-                          {
-                            color: isSelected
-                              ? '#FFFFFF'
-                              : palette.secondary,
-                          },
+                          { color: selected ? '#FFFFFF' : palette.secondary },
                         ]}
                       >
                         {option.label}
@@ -415,7 +375,6 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* Searchable saved items */}
         <SavedItemsList
           refreshKey={refreshKey}
           searchQuery={debouncedSearch}
@@ -425,30 +384,27 @@ export default function HomeScreen() {
         />
       </ScrollView>
 
-      {/* Create Note / Link */}
+      <SettingsModal
+        visible={settingsVisible}
+        onClose={() => setSettingsVisible(false)}
+      />
       <CreateNoteModal
         visible={creatingType !== null}
         itemType={creatingType ?? 'note'}
         onClose={() => setCreatingType(null)}
         onSaved={handleItemSaved}
       />
-
-      {/* Create Image */}
       <CreateImageModal
         visible={isImageModalVisible}
         onClose={() => setIsImageModalVisible(false)}
         onSaved={handleImageSaved}
       />
-
-      {/* Edit Note / Link */}
       <EditNoteModal
         visible={selectedNote !== null}
         note={selectedNote}
         onClose={() => setSelectedNote(null)}
         onSaved={handleNoteEdited}
       />
-
-      {/* View saved image */}
       <ImageViewerModal
         image={selectedImageItem}
         onClose={() => setSelectedImageItem(null)}
@@ -460,238 +416,222 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: 26,
+    paddingHorizontal: 24,
   },
-
   header: {
-    paddingTop: 18,
-    paddingBottom: 12,
-    gap: 8,
-  },
-
-  wordmark: {
-    fontSize: 36,
-    fontWeight: '600',
-    letterSpacing: -2,
-  },
-
-  eyebrow: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2.5,
-  },
-
-  accentRule: {
-    width: 42,
-    height: 3,
-    borderRadius: 999,
-    marginTop: 8,
-  },
-
-  scrollArea: {
-    flex: 1,
-  },
-
-  scrollContent: {
-    paddingTop: 28,
-    paddingBottom: 20,
-  },
-
-  heading: {
-    fontSize: 40,
-    fontWeight: '500',
-    lineHeight: 47,
-    letterSpacing: -1.8,
-    maxWidth: 330,
-  },
-
-  description: {
-    fontSize: 15,
-    lineHeight: 24,
-    marginTop: 18,
-    maxWidth: 315,
-  },
-
-  createButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 28,
-  },
-
-  newNoteButton: {
-    flex: 1,
-    backgroundColor: '#315C46',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  newNoteButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  newLinkButton: {
-    flex: 1,
-    borderWidth: 1,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  newLinkButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  newImageButton: {
-    marginTop: 10,
-    borderWidth: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  newImageButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  searchSection: {
-    marginTop: 34,
-  },
-
-  searchHeadingRow: {
+    paddingTop: 12,
+    paddingBottom: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(135,155,135,0.22)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
   },
-
-  searchHeadingText: {
-    flex: 1,
-    gap: 6,
+  headerIdentity: { flex: 1, gap: 1 },
+  settingsButton: {
+    minWidth: 79,
+    height: 40,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  searchLabel: {
-    fontSize: 11,
+  settingsGlyph: { fontSize: 12, fontWeight: '600', letterSpacing: 0.1 },
+  wordmark: {
+    fontSize: 35,
     fontWeight: '700',
-    letterSpacing: 2,
+    letterSpacing: -2,
   },
-
-  searchHint: {
+  headerCaption: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 2.2,
+    marginTop: 1,
+  },
+  scrollArea: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingTop: 22,
+    paddingBottom: 22,
+  },
+  intro: {
+    gap: 7,
+  },
+  heading: {
+    fontFamily: Platform.select({ ios: 'Georgia', default: 'serif' }),
+    fontSize: 32,
+    fontWeight: '400',
+    lineHeight: 39,
+    letterSpacing: -0.8,
+  },
+  description: {
+    fontSize: 13,
+    lineHeight: 20,
+    maxWidth: 320,
+  },
+  addButton: {
+    marginTop: 20,
+    minHeight: 54,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+  },
+  addButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: 0.1,
+  },
+  addButtonGlyph: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    fontWeight: '300',
+    lineHeight: 30,
+  },
+  addMenu: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  addMenuOption: {
+    minHeight: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 17,
+    paddingVertical: 12,
+    gap: 14,
+  },
+  addMenuNumber: {
     fontSize: 12,
-    lineHeight: 18,
+    fontWeight: '600',
+    letterSpacing: 1,
+    width: 23,
   },
-
+  addMenuCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  addMenuTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  addMenuDescription: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  addMenuArrow: {
+    fontSize: 20,
+  },
+  collectionSection: {
+    marginTop: 30,
+  },
+  collectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  collectionHeadingCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  collectionLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 2.2,
+  },
+  collectionTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    letterSpacing: -0.6,
+  },
   searchToggle: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 999,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    minHeight: 44,
     paddingHorizontal: 15,
-    borderWidth: 1,
-    borderRadius: 999,
   },
-
   searchToggleText: {
     fontSize: 13,
     fontWeight: '600',
   },
-
   searchToggleGlyph: {
     fontSize: 19,
-    lineHeight: 21,
     fontWeight: '400',
   },
-
   activeSearchRow: {
+    marginTop: 11,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-    marginTop: 14,
+    alignItems: 'center',
+    gap: 12,
   },
-
   activeSearchText: {
+    fontSize: 12,
     flex: 1,
-    fontSize: 13,
   },
-
   resetButton: {
-    minHeight: 40,
+    minHeight: 38,
     justifyContent: 'center',
-    paddingHorizontal: 6,
   },
-
   resetText: {
-    color: '#8A4B32',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
-
   searchControls: {
-    marginTop: 16,
+    marginTop: 13,
   },
-
   searchBox: {
+    minHeight: 50,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    minHeight: 54,
   },
-
   searchInput: {
     flex: 1,
     fontSize: 14,
-    paddingVertical: 14,
+    paddingVertical: 12,
   },
-
   clearButton: {
     minWidth: 30,
     minHeight: 36,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 6,
+    alignItems: 'center',
+    marginLeft: 4,
   },
-
   clearText: {
-    fontSize: 26,
-    lineHeight: 30,
-    fontWeight: '300',
+    fontSize: 24,
+    lineHeight: 28,
   },
-
   filterScroll: {
-    marginTop: 15,
+    marginTop: 12,
   },
-
   filterRow: {
     flexDirection: 'row',
     gap: 8,
     paddingRight: 12,
   },
-
   filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 999,
+    minHeight: 39,
     borderWidth: 1,
-    minHeight: 40,
+    borderRadius: 999,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   filterText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
 });
