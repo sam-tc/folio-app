@@ -1,1 +1,1 @@
-export { useColorScheme } from 'react-native';
+export { useFolioColorScheme as useColorScheme } from '@/components/appearance-provider';

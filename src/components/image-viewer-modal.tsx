@@ -1,3 +1,4 @@
+import { useFolioColorScheme as useColorScheme } from '@/components/appearance-provider';
 import {
   Image,
   Modal,
@@ -5,7 +6,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
 } from 'react-native';
 import {
   SafeAreaProvider,

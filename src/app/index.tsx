@@ -1,3 +1,4 @@
+import { useFolioColorScheme as useColorScheme } from '@/components/appearance-provider';
 import { useEffect, useState } from 'react';
 import {
   Alert,
@@ -8,7 +9,6 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 

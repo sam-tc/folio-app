@@ -1,3 +1,4 @@
+import { useFolioColorScheme as useColorScheme } from '@/components/appearance-provider';
 
 import { useCallback, useState } from 'react';
 import {
@@ -7,7 +8,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';

@@ -1,3 +1,4 @@
+import { useFolioColorScheme as useColorScheme } from '@/components/appearance-provider';
 import { useState } from 'react';
 import {
   Modal,
@@ -5,7 +6,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
   useWindowDimensions,
 } from 'react-native';
 

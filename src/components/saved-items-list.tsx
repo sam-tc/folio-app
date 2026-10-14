@@ -1,3 +1,4 @@
+import { useFolioColorScheme as useColorScheme } from '@/components/appearance-provider';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
@@ -8,7 +9,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
 } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 

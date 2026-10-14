@@ -11,16 +11,21 @@ import {
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { useSQLiteContext } from 'expo-sqlite';
 import {
   initialWindowMetrics,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-import { useSQLiteContext } from 'expo-sqlite';
 
+import { useFolioColorScheme } from '@/components/appearance-provider';
 import type { SavedItem } from '@/database/items';
 import { updateImageMetadata } from '@/database/images';
+import {
+  deleteStoredImage,
+  savePickedImage,
+} from '@/utils/image-storage';
 
 type Props = {
   image: SavedItem | null;
@@ -34,10 +39,10 @@ type Palette = {
   preview: string;
   border: string;
   text: string;
-  secondaryText: string;
-  subtleText: string;
+  secondary: string;
+  subtle: string;
   accent: string;
-  accentText: string;
+  accentOn: string;
   placeholder: string;
 };
 
@@ -48,10 +53,10 @@ const palettes: Record<'light' | 'dark', Palette> = {
     preview: '#E8EDE5',
     border: '#D8E0D5',
     text: '#222A22',
-    secondaryText: '#526457',
-    subtleText: '#728174',
+    secondary: '#526457',
+    subtle: '#728174',
     accent: '#315C46',
-    accentText: '#FFFFFF',
+    accentOn: '#FFFFFF',
     placeholder: '#829184',
   },
   dark: {
@@ -60,10 +65,10 @@ const palettes: Record<'light' | 'dark', Palette> = {
     preview: '#222B24',
     border: '#45574B',
     text: '#F7F4EE',
-    secondaryText: '#C3CBC1',
-    subtleText: '#9BAB9D',
+    secondary: '#C3CBC1',
+    subtle: '#9BAB9D',
     accent: '#A9CFB1',
-    accentText: '#172319',
+    accentOn: '#172319',
     placeholder: '#A0AEA2',
   },
 };
@@ -75,143 +80,281 @@ export default function EditImageModal({
 }: Props) {
   const db = useSQLiteContext();
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const isDark = scheme === 'dark';
-  const colors = palettes[isDark ? 'dark' : 'light'];
-  const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const safeTop = Math.max(
-    insets.top,
-    initialWindowMetrics?.insets.top ?? 0
+  const isDark = useFolioColorScheme() === 'dark';
+  const colors = palettes[isDark ? 'dark' : 'light'];
+
+  const styles = useMemo(
+    () => createStyles(colors),
+    [colors]
   );
-  const safeBottom = Math.max(
+
+  const topInset = Math.max(
+    insets.top,
+    initialWindowMetrics?.insets.top ?? 0,
+    Platform.OS === 'ios' ? 56 : 0
+  );
+
+  const bottomInset = Math.max(
     insets.bottom,
-    initialWindowMetrics?.insets.bottom ?? 0
+    initialWindowMetrics?.insets.bottom ?? 0,
+    Platform.OS === 'ios' ? 24 : 0
   );
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
+
+  const [replacement, setReplacement] =
+    useState<ImagePicker.ImagePickerAsset | null>(null);
+
+  const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Refill the editor when the user chooses a different image.
+  const busy = picking || saving;
+
   useEffect(() => {
-    if (image) {
-      setTitle(image.title);
-      setDescription(image.content);
-      setTags(image.tags.join(', '));
-    }
+    // Reset the form when a different image is opened.
+    setTitle(image?.title ?? '');
+    setDescription(image?.content ?? '');
+    setTags(image?.tags.join(', ') ?? '');
+    setReplacement(null);
   }, [image]);
 
-  function handleClose() {
-    if (saving) return;
+  function handleCancel() {
+    if (busy) return;
+
+    // No permanent image copy has been made yet.
+    setReplacement(null);
     onClose();
   }
 
+  async function handlePickImage() {
+    if (busy || !image) return;
+
+    setPicking(true);
+
+    try {
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: false,
+          quality: 1,
+          selectionLimit: 1,
+        });
+
+      if (!result.canceled && result.assets.length > 0) {
+        // Preview the chosen photo without permanently
+        // replacing the existing image.
+        setReplacement(result.assets[0]);
+      }
+    } catch (error) {
+      Alert.alert(
+        'Could not choose image',
+        error instanceof Error
+          ? error.message
+          : 'Please try again.'
+      );
+    } finally {
+      setPicking(false);
+    }
+  }
+
   async function handleSave() {
-    if (!image || saving) return;
+    if (!image || busy) return;
 
     if (!title.trim()) {
-      Alert.alert('Missing title', 'Please enter a title for your image.');
+      Alert.alert(
+        'Missing title',
+        'Please enter a title for your image.'
+      );
       return;
     }
 
     setSaving(true);
+
+    let newStoredUri: string | null = null;
+    let databaseSaved = false;
+
     try {
-      // Only image details change. The original image file stays intact.
+      if (replacement) {
+        // Copy the replacement into Folio's private folder.
+        newStoredUri = await savePickedImage(replacement);
+      }
+
+      // Update the metadata and image location together.
+      // The database function also queues the old file
+      // for safe cleanup after the transaction commits.
       await updateImageMetadata(
         db,
         image.id,
         title,
         description,
-        tags.split(',')
+        tags.split(','),
+        newStoredUri ?? undefined
       );
 
-      onSaved();
-      onClose();
+      databaseSaved = true;
     } catch (error) {
       Alert.alert(
-        'Could not update image',
-        error instanceof Error ? error.message : 'Please try again.'
+        'Could not save image',
+        error instanceof Error
+          ? error.message
+          : 'Please try again.'
       );
     } finally {
+      // If SQLite couldn't save the replacement,
+      // remove the newly copied file.
+      //
+      // Never delete the original image here.
+      if (newStoredUri && !databaseSaved) {
+        try {
+          deleteStoredImage(newStoredUri);
+        } catch (cleanupError) {
+          console.warn(
+            'Could not remove unsaved replacement:',
+            cleanupError
+          );
+        }
+      }
+
       setSaving(false);
     }
+
+    if (databaseSaved) {
+      setReplacement(null);
+      onSaved();
+      onClose();
+    }
   }
+
+  const previewUri =
+    replacement?.uri ?? image?.image_uri;
 
   return (
     <Modal
       visible={image?.type === 'image'}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={handleClose}
+      onRequestClose={handleCancel}
     >
       <View
         style={[
           styles.screen,
-          { paddingTop: safeTop, paddingBottom: safeBottom },
+          {
+            paddingTop: topInset,
+            paddingBottom: bottomInset,
+          },
         ]}
       >
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={
+            Platform.OS === 'ios' ? 'padding' : undefined
+          }
         >
           <View style={styles.header}>
             <Pressable
-              style={styles.headerAction}
-              onPress={handleClose}
-              disabled={saving}
+              onPress={handleCancel}
+              disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="Cancel image editing"
+              style={styles.headerAction}
             >
               <Text style={styles.cancel}>Cancel</Text>
             </Pressable>
 
-            <Text style={styles.heading}>Edit image</Text>
+            <Text style={styles.headerTitle}>
+              Edit image
+            </Text>
 
             <Pressable
-              style={[styles.headerAction, styles.headerActionRight]}
               onPress={() => void handleSave()}
-              disabled={saving}
+              disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="Save image changes"
+              style={[
+                styles.headerAction,
+                styles.headerRight,
+              ]}
             >
-              <Text style={[styles.save, saving && styles.saving]}>
+              <Text
+                style={[
+                  styles.saveText,
+                  busy && styles.dimmed,
+                ]}
+              >
                 {saving ? 'Saving…' : 'Save'}
               </Text>
             </Pressable>
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.form}
+            contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            keyboardDismissMode={
+              Platform.OS === 'ios'
+                ? 'interactive'
+                : 'on-drag'
+            }
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.eyebrow}>YOUR COLLECTION</Text>
-            <Text style={styles.title}>A moment worth keeping.</Text>
-            <Text style={styles.intro}>
-              Give this image a name and a little context so you can find it later.
+            <Text style={styles.eyebrow}>
+              YOUR COLLECTION
             </Text>
 
-            <View style={styles.previewContainer}>
-              {image?.image_uri ? (
+            <Text style={styles.title}>
+              A moment worth keeping.
+            </Text>
+
+            <Text style={styles.intro}>
+              Change the photo or its details.
+              Nothing changes until you save.
+            </Text>
+
+            <View style={styles.previewBox}>
+              {previewUri ? (
                 <Image
-                  source={{ uri: image.image_uri }}
+                  source={{ uri: previewUri }}
                   style={styles.previewImage}
                   resizeMode="contain"
-                  accessibilityLabel={image.title}
+                  accessibilityLabel="Image preview"
                 />
               ) : (
-                <Text style={styles.unavailable}>Image unavailable</Text>
+                <Text style={styles.hint}>
+                  Image unavailable
+                </Text>
               )}
             </View>
+
+            <Pressable
+              onPress={() => void handlePickImage()}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel="Change image from photo library"
+              style={({ pressed }) => [
+                styles.changeButton,
+                (busy || pressed) && styles.dimmed,
+              ]}
+            >
+              <Text style={styles.changeButtonText}>
+                {picking
+                  ? 'Opening Photos…'
+                  : 'Change image'}
+              </Text>
+            </Pressable>
+
             <Text style={styles.previewHint}>
-              Your original image will be preserved.
+              {replacement
+                ? 'New photo selected. Tap Save to replace the original.'
+                : 'Your current photo stays saved until you choose another.'}
             </Text>
 
             <View style={styles.field}>
-              <Text style={styles.label}>TITLE</Text>
+              <Text style={styles.label}>
+                TITLE
+              </Text>
+
               <TextInput
                 style={styles.input}
                 value={title}
@@ -219,30 +362,45 @@ export default function EditImageModal({
                 placeholder="Give your image a title"
                 placeholderTextColor={colors.placeholder}
                 selectionColor={colors.accent}
-                keyboardAppearance={isDark ? 'dark' : 'light'}
+                keyboardAppearance={
+                  isDark ? 'dark' : 'light'
+                }
                 maxLength={150}
+                editable={!busy}
                 accessibilityLabel="Image title"
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.label}>DESCRIPTION (OPTIONAL)</Text>
+              <Text style={styles.label}>
+                DESCRIPTION (OPTIONAL)
+              </Text>
+
               <TextInput
-                style={[styles.input, styles.textArea]}
+                style={[
+                  styles.input,
+                  styles.textArea,
+                ]}
                 value={description}
                 onChangeText={setDescription}
                 placeholder="What would you like to remember?"
                 placeholderTextColor={colors.placeholder}
                 selectionColor={colors.accent}
-                keyboardAppearance={isDark ? 'dark' : 'light'}
+                keyboardAppearance={
+                  isDark ? 'dark' : 'light'
+                }
                 multiline
                 textAlignVertical="top"
+                editable={!busy}
                 accessibilityLabel="Image description"
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.label}>TAGS</Text>
+              <Text style={styles.label}>
+                TAGS
+              </Text>
+
               <TextInput
                 style={styles.input}
                 value={tags}
@@ -250,11 +408,17 @@ export default function EditImageModal({
                 placeholder="inspiration, college, ideas"
                 placeholderTextColor={colors.placeholder}
                 selectionColor={colors.accent}
-                keyboardAppearance={isDark ? 'dark' : 'light'}
+                keyboardAppearance={
+                  isDark ? 'dark' : 'light'
+                }
                 autoCapitalize="none"
+                editable={!busy}
                 accessibilityLabel="Image tags"
               />
-              <Text style={styles.hint}>Separate multiple tags with commas.</Text>
+
+              <Text style={styles.hint}>
+                Separate tags using commas.
+              </Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -265,104 +429,158 @@ export default function EditImageModal({
 
 function createStyles(colors: Palette) {
   return StyleSheet.create({
-    flex: { flex: 1 },
+    flex: {
+      flex: 1,
+    },
+
     screen: {
       flex: 1,
       backgroundColor: colors.background,
     },
+
     header: {
+      minHeight: 64,
+      paddingHorizontal: 20,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 20,
-      minHeight: 64,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.border,
     },
+
     headerAction: {
       minWidth: 72,
       minHeight: 44,
       justifyContent: 'center',
     },
-    headerActionRight: { alignItems: 'flex-end' },
-    heading: {
-      color: colors.text,
-      fontSize: 16,
-      fontWeight: '600',
-      letterSpacing: -0.3,
+
+    headerRight: {
+      alignItems: 'flex-end',
     },
-    cancel: { color: colors.secondaryText, fontSize: 15 },
-    save: { color: colors.accent, fontSize: 15, fontWeight: '700' },
-    saving: { opacity: 0.5 },
-    form: {
+
+    headerTitle: {
+      fontSize: 16,
+      color: colors.text,
+      fontWeight: '600',
+    },
+
+    cancel: {
+      color: colors.secondary,
+      fontSize: 15,
+    },
+
+    saveText: {
+      color: colors.accent,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+
+    dimmed: {
+      opacity: 0.5,
+    },
+
+    content: {
       paddingHorizontal: 24,
       paddingTop: 28,
-      paddingBottom: 48,
+      paddingBottom: 60,
     },
+
     eyebrow: {
       color: colors.accent,
       fontSize: 11,
       fontWeight: '700',
-      letterSpacing: 2.1,
-      marginBottom: 10,
+      letterSpacing: 2,
     },
+
     title: {
       color: colors.text,
       fontSize: 29,
-      lineHeight: 36,
       fontWeight: '600',
-      letterSpacing: -1.1,
-      marginBottom: 8,
+      letterSpacing: -1,
+      marginTop: 12,
     },
+
     intro: {
-      color: colors.secondaryText,
+      color: colors.secondary,
       fontSize: 14,
       lineHeight: 21,
+      marginTop: 8,
       marginBottom: 22,
     },
-    previewContainer: {
-      height: 200,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: colors.border,
+
+    previewBox: {
+      height: 215,
       backgroundColor: colors.preview,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 18,
       overflow: 'hidden',
       alignItems: 'center',
       justifyContent: 'center',
     },
-    previewImage: { width: '100%', height: '100%' },
-    unavailable: { color: colors.subtleText, fontSize: 14 },
-    previewHint: {
-      color: colors.subtleText,
-      textAlign: 'center',
-      fontSize: 12,
-      marginTop: 10,
-      marginBottom: 22,
+
+    previewImage: {
+      width: '100%',
+      height: '100%',
     },
-    field: { marginTop: 20 },
+
+    changeButton: {
+      alignSelf: 'center',
+      marginTop: 15,
+      backgroundColor: colors.accent,
+      borderRadius: 999,
+      paddingHorizontal: 22,
+      minHeight: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    changeButtonText: {
+      color: colors.accentOn,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+
+    previewHint: {
+      textAlign: 'center',
+      color: colors.subtle,
+      fontSize: 12,
+      lineHeight: 18,
+      marginTop: 10,
+    },
+
+    field: {
+      marginTop: 24,
+    },
+
     label: {
-      color: colors.secondaryText,
+      color: colors.secondary,
       fontSize: 11,
       fontWeight: '700',
       letterSpacing: 1.6,
       marginBottom: 10,
     },
+
     input: {
-      color: colors.text,
-      backgroundColor: colors.surface,
+      minHeight: 52,
+      borderRadius: 13,
       borderWidth: 1,
       borderColor: colors.border,
-      borderRadius: 13,
+      backgroundColor: colors.surface,
+      color: colors.text,
+      fontSize: 16,
       paddingHorizontal: 16,
       paddingVertical: 14,
-      minHeight: 52,
-      fontSize: 16,
     },
-    textArea: { minHeight: 112, paddingTop: 15 },
+
+    textArea: {
+      minHeight: 112,
+      paddingTop: 15,
+    },
+
     hint: {
-      color: colors.subtleText,
+      color: colors.subtle,
       fontSize: 12,
-      lineHeight: 18,
       marginTop: 9,
     },
   });

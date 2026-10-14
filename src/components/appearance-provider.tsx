@@ -1,16 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Appearance } from 'react-native';
+import { AppState, Appearance } from 'react-native';
 import Storage from 'expo-sqlite/kv-store';
 
-// A preference is different from the effective theme.
-// "system" means Folio follows the phone's own appearance setting.
 export type AppearancePreference = 'system' | 'light' | 'dark';
+export type FolioColorScheme = 'light' | 'dark';
 
 const STORAGE_KEY = 'folio.appearance.v1';
 
 type AppearanceContextValue = {
   preference: AppearancePreference;
+  colorScheme: FolioColorScheme;
   setPreference: (value: AppearancePreference) => Promise<void>;
 };
 
@@ -30,36 +30,56 @@ function loadSavedPreference(): AppearancePreference {
   }
 }
 
-export function AppearanceProvider({ children }: { children: ReactNode }) {
-  const [preference, updatePreference] = useState<AppearancePreference>(
-    loadSavedPreference
-  );
+function readSystemScheme(): FolioColorScheme {
+  return Appearance.getColorScheme() === 'dark' ? 'dark' : 'light';
+}
 
-  // This React Native API changes the *whole app's* effective scheme.
-  // Existing useColorScheme() hooks in the Library, Archive and tabs
-  // therefore update without being rewritten individually.
+export function AppearanceProvider({ children }: { children: ReactNode }) {
+  const [preference, updatePreference] =
+    useState<AppearancePreference>(loadSavedPreference);
+  const [systemScheme, updateSystemScheme] =
+    useState<FolioColorScheme>(readSystemScheme);
+
   useEffect(() => {
-    Appearance.setColorScheme(preference === 'system' ? 'unspecified' : preference);
-  }, [preference]);
+    // Listen to genuine iOS/Android system appearance changes directly.
+    // Do not call Appearance.setColorScheme: that overrides the OS value.
+    const appearanceSubscription = Appearance.addChangeListener(({ colorScheme }) => {
+      updateSystemScheme(colorScheme === 'dark' ? 'dark' : 'light');
+    });
+
+    // iOS may update appearance while Folio is backgrounded in Settings.
+    // Read it again each time Folio becomes active.
+    const stateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        updateSystemScheme(readSystemScheme());
+      }
+    });
+
+    return () => {
+      appearanceSubscription.remove();
+      stateSubscription.remove();
+    };
+  }, []);
+
+  const colorScheme: FolioColorScheme =
+    preference === 'system' ? systemScheme : preference;
 
   async function setPreference(nextPreference: AppearancePreference) {
+    if (nextPreference === preference) return;
     const previous = preference;
-    if (previous === nextPreference) return;
-
     updatePreference(nextPreference);
 
     try {
       await Storage.setItem(STORAGE_KEY, nextPreference);
     } catch (error) {
-      // Do not show a saved selection if persistence failed.
       updatePreference(previous);
       throw error;
     }
   }
 
   const value = useMemo(
-    () => ({ preference, setPreference }),
-    [preference]
+    () => ({ preference, colorScheme, setPreference }),
+    [preference, colorScheme]
   );
 
   return (
@@ -69,10 +89,14 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useAppearancePreference() {
+export function useAppearancePreference(): AppearanceContextValue {
   const context = useContext(AppearanceContext);
   if (!context) {
     throw new Error('useAppearancePreference must be used inside AppearanceProvider.');
   }
   return context;
+}
+
+export function useFolioColorScheme(): FolioColorScheme {
+  return useAppearancePreference().colorScheme;
 }
