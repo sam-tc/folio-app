@@ -27,6 +27,14 @@ export default function AppTabs() {
           renderingMode="template"
         />
       </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="trash">
+        <NativeTabs.Trigger.Label>Deleted</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'trash', selected: 'trash.fill' }}
+          md="delete"
+        />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

@@ -16,7 +16,10 @@ import {
   archiveItem,
   getInboxItems,
   type SavedItem,
+  moveToRecentlyDeleted,
 } from '@/database/items';
+
+import { ItemActionsMenu } from '@/components/item-actions-menu';
 
 type Props = {
   refreshKey: number;
@@ -125,6 +128,44 @@ export default function SavedItemsList({
     );
   }
 
+  async function moveItemToTrash(item: SavedItem) {
+    if (busyItemId !== null) return;
+
+    setBusyItemId(item.id);
+
+    try {
+      await moveToRecentlyDeleted(db, item.id);
+
+      // Reload the Library so the deleted item disappears.
+      setLocalRefreshKey((current) => current + 1);
+    } catch (err) {
+      Alert.alert(
+        'Delete failed',
+        err instanceof Error
+          ? err.message
+          : 'Could not move this item to Recently Deleted.'
+      );
+    } finally {
+      setBusyItemId(null);
+    }
+  }
+
+  function handleMoveToTrash(item: SavedItem) {
+    Alert.alert(
+      'Move to Recently Deleted?',
+      'You can recover this item within 30 days. After that, it will be permanently deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Move to Trash',
+          style: 'destructive',
+          onPress: () => {
+            void moveItemToTrash(item);
+          },
+        },
+      ]
+    );
+  }
   // Loading state
   if (loading) {
     return (
@@ -209,26 +250,28 @@ export default function SavedItemsList({
           </Pressable>
 
           {/* Archive action */}
-          <View
-            style={[
-              styles.actions,
-              { borderTopColor: borderColor },
-            ]}
-          >
-            <Pressable
-              onPress={() => handleArchive(item)}
+          <View style={styles.menuRow}>
+            <ItemActionsMenu
+              itemTitle={item.title}
               disabled={busyItemId !== null}
-              accessibilityRole="button"
-              accessibilityLabel={`Archive ${item.title}`}
-              hitSlop={8}
-            >
-              <Text style={styles.archiveText}>
-                {busyItemId === item.id
-                  ? 'Archiving...'
-                  : 'Archive'}
-              </Text>
-            </Pressable>
+              actions={[
+                {
+                  label: 'Edit',
+                  onPress: () => onSelectNote(item),
+                },
+                {
+                  label: 'Archive',
+                  onPress: () => handleArchive(item),
+                },
+                {
+                  label: 'Delete',
+                  destructive: true,
+                  onPress: () => handleMoveToTrash(item),
+                },
+              ]}
+            />
           </View>
+
         </View>
       ))}
     </ScrollView>
@@ -256,6 +299,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 18,
     gap: 12,
+    position: 'relative',
+    paddingRight: 56,
   },
 
   cardContent: {
@@ -298,5 +343,13 @@ const styles = StyleSheet.create({
     padding: 24,
     marginTop: 32,
     gap: 10,
+  },
+
+  menuRow: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    zIndex: 10,
+    alignItems: 'flex-end',
   },
 });

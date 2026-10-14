@@ -77,9 +77,10 @@ export async function getInboxItems(
   db: SQLiteDatabase
 ): Promise<SavedItem[]> {
   const rows = await db.getAllAsync<ItemRow>(
-    `SELECT * FROM items
-     WHERE is_archived = 0
-     ORDER BY created_at DESC, id DESC`
+      `SELECT * FROM items
+      WHERE is_archived = 0
+        AND deleted_at IS NULL
+      ORDER BY created_at DESC, id DESC`
   );
 
   return rows.map(row => ({
@@ -229,9 +230,10 @@ export async function getArchivedItems(
   db: SQLiteDatabase
 ): Promise<SavedItem[]> {
   const rows = await db.getAllAsync<ItemRow>(
-    `SELECT * FROM items
-     WHERE is_archived = 1
-     ORDER BY updated_at DESC, id DESC`
+        `SELECT * FROM items
+        WHERE is_archived = 1
+          AND deleted_at IS NULL
+        ORDER BY updated_at DESC, id DESC`
   );
 
   return rows.map((row) => ({
