@@ -1,29 +1,64 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import {
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider,
+} from 'expo-router';
 import { SQLiteProvider } from 'expo-sqlite';
 import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
-import { initializeDatabase } from '@/database/database';
-import { purgeExpiredDeletedItems } from '@/database/items';
 import { ForegroundCleanup } from '@/components/foreground-cleanup';
 
-SplashScreen.preventAutoHideAsync();
+import { initializeDatabase } from '@/database/database';
+import { purgeExpiredDeletedItems } from '@/database/items';
+
+void SplashScreen.preventAutoHideAsync();
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider
+      value={
+        colorScheme === 'dark'
+          ? DarkTheme
+          : DefaultTheme
+      }
+    >
       <SQLiteProvider
         databaseName="folio.db"
         onInit={async (db) => {
-          // First, make sure the database is up to date.
+          // Upgrade or repair the database first.
           await initializeDatabase(db);
 
-          // Then, remove items deleted 30 or more days ago.
-          const deletedCount = await purgeExpiredDeletedItems(db);
+          // Verify the real database's schema version.
+          const version = await db.getFirstAsync<{
+            user_version: number;
+          }>('PRAGMA user_version;');
+
+          // Verify the image cleanup table exists.
+          const cleanupTable = await db.getFirstAsync<{
+            name: string;
+          }>(
+            `SELECT name
+             FROM sqlite_master
+             WHERE type = 'table'
+               AND name = 'pending_image_deletions'
+             LIMIT 1`
+          );
+
+          console.log(
+            'Folio schema:',
+            version?.user_version,
+            '| image cleanup table:',
+            cleanupTable ? 'ready' : 'missing'
+          );
+
+          // Remove expired SQLite records and queue image files.
+          const deletedCount =
+            await purgeExpiredDeletedItems(db);
 
           console.log(
             'Folio automatic cleanup:',

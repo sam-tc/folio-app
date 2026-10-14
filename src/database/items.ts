@@ -1,5 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { processPendingImageDeletions } from './image-cleanup';
+
 export type ItemType = 'note' | 'link' | 'image';
 
 export type NewItem = {
@@ -9,7 +11,6 @@ export type NewItem = {
   imageUri?: string | null;
   tags?: string[];
 };
-
 
 type ItemRow = {
   id: number;
@@ -24,11 +25,33 @@ type ItemRow = {
   deleted_at: string | null;
 };
 
-export type SavedItem = Omit<ItemRow, 'tags' | 'is_archived'> & {
+export type SavedItem = Omit<
+  ItemRow,
+  'tags' | 'is_archived'
+> & {
   tags: string[];
   is_archived: boolean;
 };
 
+const RECOVERY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Convert a SQLite row into an item used by the app.
+function toSavedItem(row: ItemRow): SavedItem {
+  return {
+    ...row,
+    tags: JSON.parse(row.tags) as string[],
+    is_archived: row.is_archived === 1,
+  };
+}
+
+// Reject invalid item IDs.
+function validateItemId(id: number): void {
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new Error('Invalid item ID.');
+  }
+}
+
+// Validate and normalize website addresses.
 export function normalizeWebUrl(input: string): string {
   const value = input.trim();
 
@@ -36,7 +59,6 @@ export function normalizeWebUrl(input: string): string {
     throw new Error('Please enter a website URL.');
   }
 
-  // Add HTTPS when the user enters something like github.com.
   const candidate = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)
     ? value
     : `https://${value}`;
@@ -44,7 +66,6 @@ export function normalizeWebUrl(input: string): string {
   try {
     const url = new URL(candidate);
 
-    // Only allow regular website links.
     if (
       (url.protocol !== 'https:' && url.protocol !== 'http:') ||
       !url.hostname ||
@@ -61,15 +82,51 @@ export function normalizeWebUrl(input: string): string {
   }
 }
 
+// Process queued image files without failing an
+// already committed database operation.
+async function safelyCleanUpImages(
+  db: SQLiteDatabase
+): Promise<void> {
+  try {
+    const result = await processPendingImageDeletions(db);
+
+    if (
+      result.deleted > 0 ||
+      result.deferred > 0 ||
+      result.failed > 0
+    ) {
+      console.log(
+        'Folio image cleanup:',
+        result.deleted,
+        'deleted,',
+        result.deferred,
+        'deferred,',
+        result.failed,
+        'failed'
+      );
+    }
+  } catch (error) {
+    // The pending deletion records stay in SQLite.
+    // A later startup or foreground cleanup can retry.
+    console.warn(
+      'Folio could not process pending image deletions:',
+      error
+    );
+  }
+}
+
+// Create a Note, Link, or Image.
 export async function createItem(
   db: SQLiteDatabase,
   item: NewItem
 ): Promise<number> {
   const title = item.title.trim();
+
   const content =
     item.type === 'link'
       ? normalizeWebUrl(item.content)
       : item.content.trim();
+
   const imageUri = item.imageUri?.trim() || null;
 
   if (!title) {
@@ -84,9 +141,13 @@ export async function createItem(
     throw new Error('Please select an image.');
   }
 
-  const tags = [...new Set(
-    (item.tags ?? []).map(tag => tag.trim()).filter(Boolean)
-  )];
+  const tags = [
+    ...new Set(
+      (item.tags ?? [])
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    ),
+  ];
 
   const timestamp = new Date().toISOString();
 
@@ -108,23 +169,21 @@ export async function createItem(
   return result.lastInsertRowId;
 }
 
+// Retrieve items in the main Library.
 export async function getInboxItems(
   db: SQLiteDatabase
 ): Promise<SavedItem[]> {
   const rows = await db.getAllAsync<ItemRow>(
-      `SELECT * FROM items
-      WHERE is_archived = 0
-        AND deleted_at IS NULL
-      ORDER BY created_at DESC, id DESC`
+    `SELECT * FROM items
+     WHERE is_archived = 0
+       AND deleted_at IS NULL
+     ORDER BY created_at DESC, id DESC`
   );
 
-  return rows.map(row => ({
-    ...row,
-    tags: JSON.parse(row.tags) as string[],
-    is_archived: row.is_archived === 1,
-  }));
+  return rows.map(toSavedItem);
 }
 
+// Edit a Note in Library.
 export async function updateNote(
   db: SQLiteDatabase,
   id: number,
@@ -132,19 +191,19 @@ export async function updateNote(
   content: string,
   tags: string[]
 ): Promise<void> {
+  validateItemId(id);
+
   const cleanTitle = title.trim();
   const cleanContent = content.trim();
-
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Invalid note ID.');
-  }
 
   if (!cleanTitle || !cleanContent) {
     throw new Error('Title and content cannot be empty.');
   }
 
   const cleanTags = [
-    ...new Set(tags.map((tag) => tag.trim()).filter(Boolean)),
+    ...new Set(
+      tags.map((tag) => tag.trim()).filter(Boolean)
+    ),
   ];
 
   const result = await db.runAsync(
@@ -153,7 +212,10 @@ export async function updateNote(
          content = ?,
          tags = ?,
          updated_at = ?
-     WHERE id = ? AND type = 'note'`,
+     WHERE id = ?
+       AND type = 'note'
+       AND is_archived = 0
+       AND deleted_at IS NULL`,
     [
       cleanTitle,
       cleanContent,
@@ -164,10 +226,13 @@ export async function updateNote(
   );
 
   if (result.changes !== 1) {
-    throw new Error('Note not found. It may have been deleted.');
+    throw new Error(
+      'Note not found in Library. It may have been archived or deleted.'
+    );
   }
 }
 
+// Edit a Link in Library.
 export async function updateLink(
   db: SQLiteDatabase,
   id: number,
@@ -175,29 +240,22 @@ export async function updateLink(
   url: string,
   tags: string[]
 ): Promise<void> {
-  // Make sure the selected item has a valid ID.
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Invalid link ID.');
-  }
+  validateItemId(id);
 
-  // Remove unnecessary spaces from the title.
   const cleanTitle = title.trim();
 
   if (!cleanTitle) {
     throw new Error('Please enter a link title.');
   }
 
-  // Validate and normalize the website address.
   const cleanUrl = normalizeWebUrl(url);
 
-  // Remove empty and duplicate tags.
   const cleanTags = [
     ...new Set(
       tags.map((tag) => tag.trim()).filter(Boolean)
     ),
   ];
 
-  // Update the existing link in SQLite.
   const result = await db.runAsync(
     `UPDATE items
      SET title = ?,
@@ -224,12 +282,7 @@ export async function updateLink(
   }
 }
 
-function validateItemId(id: number): void {
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Invalid item ID.');
-  }
-}
-
+// Move an item from Library to Archive.
 export async function archiveItem(
   db: SQLiteDatabase,
   id: number
@@ -238,16 +291,22 @@ export async function archiveItem(
 
   const result = await db.runAsync(
     `UPDATE items
-     SET is_archived = 1, updated_at = ?
-     WHERE id = ? AND is_archived = 0`,
+     SET is_archived = 1,
+         updated_at = ?
+     WHERE id = ?
+       AND is_archived = 0
+       AND deleted_at IS NULL`,
     [new Date().toISOString(), id]
   );
 
   if (result.changes !== 1) {
-    throw new Error('Item not found or already archived.');
+    throw new Error(
+      'Item not found in Library or already archived.'
+    );
   }
 }
 
+// Move an archived item back to Library.
 export async function restoreItem(
   db: SQLiteDatabase,
   id: number
@@ -256,90 +315,42 @@ export async function restoreItem(
 
   const result = await db.runAsync(
     `UPDATE items
-     SET is_archived = 0, updated_at = ?
-     WHERE id = ? AND is_archived = 1`,
+     SET is_archived = 0,
+         updated_at = ?
+     WHERE id = ?
+       AND is_archived = 1
+       AND deleted_at IS NULL`,
     [new Date().toISOString(), id]
   );
 
   if (result.changes !== 1) {
-    throw new Error('Item not found or already restored.');
-  }
-}
-
-
-export async function permanentlyDeleteItem(
-  db: SQLiteDatabase,
-  id: number
-): Promise<void> {
-  // Make sure the supplied item ID is valid.
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Invalid item ID.');
-  }
-
-  // Only permanently delete items already in Recently Deleted.
-  const result = await db.runAsync(
-    `DELETE FROM items
-     WHERE id = ?
-       AND deleted_at IS NOT NULL`,
-    [id]
-  );
-
-  // Check whether SQLite actually deleted one item.
-  if (result.changes !== 1) {
     throw new Error(
-      'Item not found in Recently Deleted.'
+      'Item not found in Archive or already restored.'
     );
   }
 }
 
-
-export async function purgeExpiredDeletedItems(
-  db: SQLiteDatabase,
-  now: Date = new Date()
-): Promise<number> {
-  // Calculate the timestamp exactly 30 days ago.
-  const cutoffDate = new Date(
-    now.getTime() - RECOVERY_PERIOD_MS
-  ).toISOString();
-
-  // Permanently delete only expired items.
-  const result = await db.runAsync(
-    `DELETE FROM items
-     WHERE deleted_at IS NOT NULL
-       AND deleted_at <= ?`,
-    [cutoffDate]
-  );
-
-  // Return how many records were deleted.
-  return result.changes;
-}
-
-
+// Retrieve archived items.
 export async function getArchivedItems(
   db: SQLiteDatabase
 ): Promise<SavedItem[]> {
   const rows = await db.getAllAsync<ItemRow>(
-        `SELECT * FROM items
-        WHERE is_archived = 1
-          AND deleted_at IS NULL
-        ORDER BY updated_at DESC, id DESC`
+    `SELECT * FROM items
+     WHERE is_archived = 1
+       AND deleted_at IS NULL
+     ORDER BY updated_at DESC, id DESC`
   );
 
-  return rows.map((row) => ({
-    ...row,
-    tags: JSON.parse(row.tags) as string[],
-    is_archived: row.is_archived === 1,
-  }));
+  return rows.map(toSavedItem);
 }
 
-
+// Move an item to Recently Deleted.
+// The image file is deliberately preserved.
 export async function moveToRecentlyDeleted(
   db: SQLiteDatabase,
   id: number
 ): Promise<void> {
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Invalid item ID.');
-  }
+  validateItemId(id);
 
   const deletedAt = new Date().toISOString();
 
@@ -359,7 +370,7 @@ export async function moveToRecentlyDeleted(
   }
 }
 
-
+// Retrieve items in Recently Deleted.
 export async function getRecentlyDeletedItems(
   db: SQLiteDatabase
 ): Promise<SavedItem[]> {
@@ -369,23 +380,15 @@ export async function getRecentlyDeletedItems(
      ORDER BY deleted_at DESC, id DESC`
   );
 
-  return rows.map((row) => ({
-    ...row,
-    tags: JSON.parse(row.tags) as string[],
-    is_archived: row.is_archived === 1,
-  }));
+  return rows.map(toSavedItem);
 }
 
-
-const RECOVERY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
-
+// Restore an item within its 30-day recovery period.
 export async function restoreDeletedItem(
   db: SQLiteDatabase,
   id: number
 ): Promise<void> {
-  if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('Invalid item ID.');
-  }
+  validateItemId(id);
 
   const cutoffDate = new Date(
     Date.now() - RECOVERY_PERIOD_MS
@@ -410,4 +413,115 @@ export async function restoreDeletedItem(
       'Item not found or its 30-day recovery period has expired.'
     );
   }
+}
+
+// Permanently delete a trashed item.
+//
+// The SQLite transaction first records any image file
+// needing cleanup. Physical deletion happens afterward.
+export async function permanentlyDeleteItem(
+  db: SQLiteDatabase,
+  id: number
+): Promise<void> {
+  validateItemId(id);
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const item = await txn.getFirstAsync<{
+      type: ItemType;
+      image_uri: string | null;
+    }>(
+      `SELECT type, image_uri
+       FROM items
+       WHERE id = ?
+         AND deleted_at IS NOT NULL`,
+      [id]
+    );
+
+    if (!item) {
+      throw new Error(
+        'Item not found in Recently Deleted.'
+      );
+    }
+
+    // Delete the SQLite record.
+    const result = await txn.runAsync(
+      `DELETE FROM items
+       WHERE id = ?
+         AND deleted_at IS NOT NULL`,
+      [id]
+    );
+
+    if (result.changes !== 1) {
+      throw new Error(
+        'Could not permanently delete the item.'
+      );
+    }
+
+    // Queue the physical file for deletion.
+    if (item.type === 'image' && item.image_uri) {
+      await txn.runAsync(
+        `INSERT OR IGNORE INTO pending_image_deletions
+          (uri, queued_at)
+         VALUES (?, ?)`,
+        [
+          item.image_uri,
+          new Date().toISOString(),
+        ]
+      );
+    }
+  });
+
+  // The transaction has now committed.
+  // Remove queued files without holding the transaction open.
+  await safelyCleanUpImages(db);
+}
+
+// Remove all items whose 30-day recovery period has ended.
+//
+// Expired images are queued and their files are processed
+// after the SQLite transaction successfully commits.
+export async function purgeExpiredDeletedItems(
+  db: SQLiteDatabase,
+  now: Date = new Date()
+): Promise<number> {
+  const cutoffDate = new Date(
+    now.getTime() - RECOVERY_PERIOD_MS
+  ).toISOString();
+
+  let deletedCount = 0;
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    // Queue the image files before deleting their records.
+    await txn.runAsync(
+      `INSERT OR IGNORE INTO pending_image_deletions
+        (uri, queued_at)
+       SELECT DISTINCT image_uri, ?
+       FROM items
+       WHERE type = 'image'
+         AND image_uri IS NOT NULL
+         AND LENGTH(TRIM(image_uri)) > 0
+         AND deleted_at IS NOT NULL
+         AND deleted_at <= ?`,
+      [
+        new Date().toISOString(),
+        cutoffDate,
+      ]
+    );
+
+    // Delete expired records from SQLite.
+    const result = await txn.runAsync(
+      `DELETE FROM items
+       WHERE deleted_at IS NOT NULL
+         AND deleted_at <= ?`,
+      [cutoffDate]
+    );
+
+    deletedCount = result.changes;
+  });
+
+  // Always process the pending queue, even when no new items
+  // expired. This retries files left from earlier failures.
+  await safelyCleanUpImages(db);
+
+  return deletedCount;
 }

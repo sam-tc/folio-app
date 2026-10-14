@@ -1,8 +1,8 @@
-
 import { useState } from 'react';
 import {
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -11,7 +11,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import CreateNoteModal from '@/components/create-note-modal';
+import CreateImageModal from '@/components/create-image-modal';
 import EditNoteModal from '@/components/edit-note-modal';
+import ImageViewerModal from '@/components/image-viewer-modal';
 import SavedItemsList from '@/components/saved-items-list';
 
 import type { SavedItem } from '@/database/items';
@@ -26,17 +28,18 @@ export default function HomeScreen() {
     accent: isDark ? '#F0BE8C' : '#8A4B32',
   };
 
-  // 'note' opens the Note form.
-  // 'link' opens the Link form.
-  // null means the creation form is closed.
   const [creatingType, setCreatingType] =
     useState<'note' | 'link' | null>(null);
 
-  // Refresh Library after creating or editing an item.
+  const [isImageModalVisible, setIsImageModalVisible] =
+    useState(false);
+
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // The selected note for the editing modal.
   const [selectedNote, setSelectedNote] =
+    useState<SavedItem | null>(null);
+
+  const [selectedImageItem, setSelectedImageItem] =
     useState<SavedItem | null>(null);
 
   function handleItemSaved() {
@@ -52,6 +55,15 @@ export default function HomeScreen() {
     );
   }
 
+  function handleImageSaved() {
+    setRefreshKey((current) => current + 1);
+
+    Alert.alert(
+      'Image saved',
+      'Your image has been added to Folio.'
+    );
+  }
+
   function handleNoteEdited() {
     setRefreshKey((current) => current + 1);
   }
@@ -63,7 +75,7 @@ export default function HomeScreen() {
         { backgroundColor: palette.background },
       ]}
     >
-      {/* Folio branding */}
+      {/* Fixed Folio branding */}
       <View style={styles.header}>
         <Text
           style={[
@@ -91,8 +103,13 @@ export default function HomeScreen() {
         />
       </View>
 
-      {/* Main Library */}
-      <View style={styles.content}>
+      {/* Scrollable Home content */}
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text
           style={[
             styles.heading,
@@ -112,7 +129,7 @@ export default function HomeScreen() {
           you want to come back to.
         </Text>
 
-        {/* Creation buttons */}
+        {/* Create Note and Link */}
         <View style={styles.createButtons}>
           <Pressable
             style={styles.newNoteButton}
@@ -145,14 +162,35 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* Notes and links saved in SQLite */}
+        {/* Create Image */}
+        <Pressable
+          style={[
+            styles.newImageButton,
+            { borderColor: palette.secondary },
+          ]}
+          onPress={() => setIsImageModalVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Create a new image"
+        >
+          <Text
+            style={[
+              styles.newImageButtonText,
+              { color: palette.text },
+            ]}
+          >
+            + New Image
+          </Text>
+        </Pressable>
+
+        {/* Saved Library */}
         <SavedItemsList
           refreshKey={refreshKey}
           onSelectNote={setSelectedNote}
+          onSelectImage={setSelectedImageItem}
         />
-      </View>
+      </ScrollView>
 
-      {/* Reusable Note / Link creation modal */}
+      {/* Create Note / Link */}
       <CreateNoteModal
         visible={creatingType !== null}
         itemType={creatingType ?? 'note'}
@@ -160,12 +198,25 @@ export default function HomeScreen() {
         onSaved={handleItemSaved}
       />
 
-      {/* Existing note editing modal */}
+      {/* Create Image */}
+      <CreateImageModal
+        visible={isImageModalVisible}
+        onClose={() => setIsImageModalVisible(false)}
+        onSaved={handleImageSaved}
+      />
+
+      {/* Edit Note / Link */}
       <EditNoteModal
         visible={selectedNote !== null}
         note={selectedNote}
         onClose={() => setSelectedNote(null)}
         onSaved={handleNoteEdited}
+      />
+
+      {/* Full-screen Image Viewer */}
+      <ImageViewerModal
+        image={selectedImageItem}
+        onClose={() => setSelectedImageItem(null)}
       />
     </SafeAreaView>
   );
@@ -178,8 +229,9 @@ const styles = StyleSheet.create({
   },
 
   header: {
-    paddingTop: 30,
-    gap: 12,
+    paddingTop: 18,
+    paddingBottom: 12,
+    gap: 8,
   },
 
   wordmark: {
@@ -201,10 +253,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  content: {
+  scrollArea: {
     flex: 1,
-    paddingTop: 35,
-    minHeight: 0,
+  },
+
+  scrollContent: {
+    paddingTop: 28,
+    paddingBottom: 72,
   },
 
   heading: {
@@ -255,6 +310,21 @@ const styles = StyleSheet.create({
   },
 
   newLinkButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+
+  newImageButton: {
+    marginTop: 10,
+    borderWidth: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  newImageButtonText: {
     fontSize: 15,
     fontWeight: '600',
   },

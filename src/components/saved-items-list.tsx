@@ -2,9 +2,9 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   Alert,
+  Image,
   Linking,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -23,12 +23,14 @@ import { ItemActionsMenu } from '@/components/item-actions-menu';
 
 type Props = {
   refreshKey: number;
-  onSelectNote: (note: SavedItem) => void;
+  onSelectNote: (item: SavedItem) => void;
+  onSelectImage: (item: SavedItem) => void;
 };
 
 export default function SavedItemsList({
   refreshKey,
   onSelectNote,
+  onSelectImage,
 }: Props) {
   const db = useSQLiteContext();
   const isDark = useColorScheme() === 'dark';
@@ -44,8 +46,7 @@ export default function SavedItemsList({
   const secondaryColor = isDark ? '#B8B8B0' : '#606060';
   const borderColor = isDark ? '#464C46' : '#D8D8D0';
 
-  // Reload Library whenever the screen gains focus
-  // or an item is created, edited, archived, or deleted.
+  // Refresh Library when screen gains focus or items change.
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -83,11 +84,15 @@ export default function SavedItemsList({
     }, [db, refreshKey, localRefreshKey])
   );
 
-  // Tap a note to edit it.
-  // Tap a link to open its website.
+  // Decide what happens when each item card is tapped.
   async function handleCardPress(item: SavedItem) {
     if (item.type === 'note') {
       onSelectNote(item);
+      return;
+    }
+
+    if (item.type === 'image') {
+      onSelectImage(item);
       return;
     }
 
@@ -103,7 +108,7 @@ export default function SavedItemsList({
     }
   }
 
-  // Save the archived status to SQLite.
+  // Move an item from Library to Archive.
   async function confirmArchive(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -112,7 +117,6 @@ export default function SavedItemsList({
     try {
       await archiveItem(db, item.id);
 
-      // Reload the Library after archiving.
       setLocalRefreshKey((current) => current + 1);
     } catch (err) {
       Alert.alert(
@@ -126,7 +130,7 @@ export default function SavedItemsList({
     }
   }
 
-  // Ask the user before archiving an item.
+  // Ask for confirmation before archiving.
   function handleArchive(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -148,7 +152,7 @@ export default function SavedItemsList({
     );
   }
 
-  // Soft-delete the selected item.
+  // Move an item to Recently Deleted.
   async function moveItemToTrash(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -157,7 +161,6 @@ export default function SavedItemsList({
     try {
       await moveToRecentlyDeleted(db, item.id);
 
-      // Remove the deleted item from Library.
       setLocalRefreshKey((current) => current + 1);
     } catch (err) {
       Alert.alert(
@@ -171,7 +174,7 @@ export default function SavedItemsList({
     }
   }
 
-  // Confirm before moving an item to Recently Deleted.
+  // Ask for confirmation before moving to Recently Deleted.
   function handleMoveToTrash(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -194,28 +197,40 @@ export default function SavedItemsList({
     );
   }
 
-  // Loading state.
   if (loading) {
     return (
-      <Text style={{ color: secondaryColor }}>
+      <Text
+        style={[
+          styles.statusText,
+          { color: secondaryColor },
+        ]}
+      >
         Loading library...
       </Text>
     );
   }
 
-  // Error state.
   if (error) {
     return (
-      <Text style={{ color: textColor }}>
+      <Text
+        style={[
+          styles.statusText,
+          { color: textColor },
+        ]}
+      >
         Error: {error}
       </Text>
     );
   }
 
-  // Empty Library state.
   if (items.length === 0) {
     return (
-      <View style={[styles.emptyState, { borderColor }]}>
+      <View
+        style={[
+          styles.emptyState,
+          { borderColor },
+        ]}
+      >
         <Text
           style={[
             styles.itemTitle,
@@ -232,12 +247,9 @@ export default function SavedItemsList({
     );
   }
 
-  // Display notes and links saved in SQLite.
+  // The parent Home ScrollView handles all scrolling.
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.list}
-    >
+    <View style={styles.list}>
       <Text
         style={[
           styles.count,
@@ -261,17 +273,16 @@ export default function SavedItemsList({
             onPress={() => {
               void handleCardPress(item);
             }}
-            disabled={
-              item.type === 'image' || busyItemId !== null
-            }
+            disabled={busyItemId !== null}
             accessibilityRole="button"
             accessibilityLabel={
               item.type === 'link'
                 ? `Open ${item.title}`
-                : `Edit ${item.title}`
+                : item.type === 'image'
+                  ? `View image ${item.title}`
+                  : `Edit ${item.title}`
             }
           >
-            {/* Item type */}
             <Text
               style={[
                 styles.type,
@@ -281,7 +292,6 @@ export default function SavedItemsList({
               {item.type.toUpperCase()}
             </Text>
 
-            {/* Item title */}
             <Text
               style={[
                 styles.itemTitle,
@@ -291,20 +301,30 @@ export default function SavedItemsList({
               {item.title}
             </Text>
 
-            {/* Note content or website URL */}
+            {/* Saved image preview */}
+            {item.type === 'image' && item.image_uri && (
+              <Image
+                source={{ uri: item.image_uri }}
+                style={styles.imagePreview}
+                resizeMode="cover"
+                accessibilityLabel={`Saved image: ${item.title}`}
+              />
+            )}
+
+            {/* Note, link or image description */}
             {item.content ? (
               <Text
-                style={{
-                  color: secondaryColor,
-                  lineHeight: 21,
-                }}
+                style={[
+                  styles.itemContent,
+                  { color: secondaryColor },
+                ]}
                 numberOfLines={3}
               >
                 {item.content}
               </Text>
             ) : null}
 
-            {/* Item tags */}
+            {/* Tags */}
             {item.tags.length > 0 ? (
               <Text
                 style={[
@@ -319,16 +339,20 @@ export default function SavedItemsList({
             ) : null}
           </Pressable>
 
-          {/* Floating three-dot menu */}
+          {/* Three-dot menu */}
           <View style={styles.menuRow}>
             <ItemActionsMenu
               itemTitle={item.title}
               disabled={busyItemId !== null}
               actions={[
-                {
-                  label: 'Edit',
-                  onPress: () => onSelectNote(item),
-                },
+                ...(item.type === 'note' || item.type === 'link'
+                  ? [
+                      {
+                        label: 'Edit',
+                        onPress: () => onSelectNote(item),
+                      },
+                    ]
+                  : []),
                 {
                   label: 'Archive',
                   onPress: () => handleArchive(item),
@@ -343,18 +367,17 @@ export default function SavedItemsList({
           </View>
         </View>
       ))}
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    flex: 1,
-    marginTop: 24,
+  statusText: {
+    marginTop: 32,
   },
 
   list: {
-    paddingBottom: 120,
+    marginTop: 32,
     gap: 12,
   },
 
@@ -385,6 +408,18 @@ const styles = StyleSheet.create({
   itemTitle: {
     fontSize: 18,
     fontWeight: '600',
+  },
+
+  itemContent: {
+    lineHeight: 21,
+  },
+
+  imagePreview: {
+    width: '100%',
+    height: 190,
+    borderRadius: 12,
+    backgroundColor: '#E6EBE5',
+    marginTop: 4,
   },
 
   tags: {

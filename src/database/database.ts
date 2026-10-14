@@ -1,26 +1,24 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-// Version 2 introduces the deleted_at column.
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 
 export async function initializeDatabase(db: SQLiteDatabase) {
-  // Improve SQLite read/write behavior.
+  // Enable Write-Ahead Logging.
   await db.execAsync('PRAGMA journal_mode = WAL;');
 
-  // Read the database's existing schema version.
+  // Read the database's current schema version.
   const result = await db.getFirstAsync<{
     user_version: number;
   }>('PRAGMA user_version;');
 
   let currentVersion = result?.user_version ?? 0;
 
-  // Avoid opening a database created by a newer schema.
+  // Prevent an older app version from modifying a newer database.
   if (currentVersion > DATABASE_VERSION) {
     throw new Error('Unsupported database version.');
   }
 
-  // Migration 0 -> 1: Create the original items table.
-  // This runs only for a brand-new database.
+  // Version 0 -> 1: Create the original items table.
   if (currentVersion === 0) {
     await db.withExclusiveTransactionAsync(async (txn) => {
       await txn.execAsync(`
@@ -45,15 +43,73 @@ export async function initializeDatabase(db: SQLiteDatabase) {
     currentVersion = 1;
   }
 
-  // Migration 1 -> 2: Add Recently Deleted support.
+  // Version 1 -> 2: Add Recently Deleted support.
   if (currentVersion === 1) {
     await db.withExclusiveTransactionAsync(async (txn) => {
-      await txn.execAsync(`
-        ALTER TABLE items
-        ADD COLUMN deleted_at TEXT;
-      `);
+      const columns = await txn.getAllAsync<{
+        name: string;
+      }>('PRAGMA table_info(items);');
+
+      const hasDeletedAt = columns.some(
+        (column) => column.name === 'deleted_at'
+      );
+
+      // Avoid attempting to add an existing column.
+      if (!hasDeletedAt) {
+        await txn.execAsync(`
+          ALTER TABLE items
+          ADD COLUMN deleted_at TEXT;
+        `);
+      }
 
       await txn.execAsync('PRAGMA user_version = 2;');
     });
+
+    currentVersion = 2;
+  }
+
+  // Version 2 -> 3: Add persistent image deletion tracking.
+  if (currentVersion === 2) {
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      await txn.execAsync(`
+        CREATE TABLE IF NOT EXISTS pending_image_deletions (
+          uri TEXT PRIMARY KEY,
+          queued_at TEXT NOT NULL
+        );
+      `);
+
+      await txn.execAsync('PRAGMA user_version = 3;');
+    });
+
+    currentVersion = 3;
+  }
+
+  // Safeguard:
+  // Repair a missing cleanup table even if the database
+  // already reports schema version 3.
+  //
+  // IF NOT EXISTS keeps all existing queue entries intact.
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS pending_image_deletions (
+      uri TEXT PRIMARY KEY,
+      queued_at TEXT NOT NULL
+    );
+  `);
+
+  // Confirm the required table is available.
+  const cleanupTable = await db.getFirstAsync<{
+    name: string;
+  }>(
+    `SELECT name
+     FROM sqlite_master
+     WHERE type = 'table'
+       AND name = 'pending_image_deletions'
+     LIMIT 1`
+  );
+
+  if (!cleanupTable) {
+    throw new Error(
+      'Image cleanup table could not be initialized.'
+    );
   }
 }

@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import {
   Alert,
@@ -12,7 +11,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+} from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import {
@@ -102,7 +104,11 @@ export default function CreateNoteModal({
       presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
-      <SafeAreaView style={styles.screen}>
+    <SafeAreaProvider>
+      <SafeAreaView
+        edges={['top', 'bottom']}
+        style={styles.screen}
+      >
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -204,6 +210,7 @@ export default function CreateNoteModal({
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+    </SafeAreaProvider>
     </Modal>
   );
 }
