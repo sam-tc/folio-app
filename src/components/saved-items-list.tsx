@@ -1,5 +1,6 @@
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   Alert,
   Pressable,
@@ -29,10 +30,12 @@ export default function SavedItemsList({
   const db = useSQLiteContext();
   const isDark = useColorScheme() === 'dark';
 
+  // State for saved items, loading and errors
   const [items, setItems] = useState<SavedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // State for refreshing and archive operations
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
   const [busyItemId, setBusyItemId] = useState<number | null>(null);
 
@@ -40,41 +43,46 @@ export default function SavedItemsList({
   const secondaryColor = isDark ? '#B8B8B0' : '#606060';
   const borderColor = isDark ? '#464C46' : '#D8D8D0';
 
-  useEffect(() => {
-    let cancelled = false;
+  // Reload saved items whenever the Library screen gains focus
+  // or a refresh key changes.
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
 
-    async function loadItems() {
-      setLoading(true);
+      async function loadItems() {
+        setLoading(true);
 
-      try {
-        const savedItems = await getInboxItems(db);
+        try {
+          const savedItems = await getInboxItems(db);
 
-        if (!cancelled) {
-          setItems(savedItems);
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Failed to load items.'
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
+          if (active) {
+            setItems(savedItems);
+            setError(null);
+          }
+        } catch (err) {
+          if (active) {
+            setError(
+              err instanceof Error
+                ? err.message
+                : 'Failed to load items.'
+            );
+          }
+        } finally {
+          if (active) {
+            setLoading(false);
+          }
         }
       }
-    }
 
-    void loadItems();
+      void loadItems();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [db, refreshKey, localRefreshKey]);
+      return () => {
+        active = false;
+      };
+    }, [db, refreshKey, localRefreshKey])
+  );
 
+  // Archive a saved item in SQLite
   async function confirmArchive(item: SavedItem) {
     if (busyItemId !== null) return;
 
@@ -83,7 +91,7 @@ export default function SavedItemsList({
     try {
       await archiveItem(db, item.id);
 
-      // Reload the Library after archiving.
+      // Refresh Library after successfully archiving
       setLocalRefreshKey((current) => current + 1);
     } catch (err) {
       Alert.alert(
@@ -97,6 +105,7 @@ export default function SavedItemsList({
     }
   }
 
+  // Ask for confirmation before archiving
   function handleArchive(item: SavedItem) {
     Alert.alert(
       'Archive this item?',
@@ -116,6 +125,7 @@ export default function SavedItemsList({
     );
   }
 
+  // Loading state
   if (loading) {
     return (
       <Text style={{ color: secondaryColor }}>
@@ -124,6 +134,7 @@ export default function SavedItemsList({
     );
   }
 
+  // Error state
   if (error) {
     return (
       <Text style={{ color: textColor }}>
@@ -132,6 +143,7 @@ export default function SavedItemsList({
     );
   }
 
+  // Empty Library state
   if (items.length === 0) {
     return (
       <View style={[styles.emptyState, { borderColor }]}>
@@ -146,6 +158,7 @@ export default function SavedItemsList({
     );
   }
 
+  // Display saved items
   return (
     <ScrollView
       style={styles.scroll}
@@ -160,6 +173,7 @@ export default function SavedItemsList({
           key={item.id}
           style={[styles.card, { borderColor }]}
         >
+          {/* Tap a note to edit it */}
           <Pressable
             style={styles.cardContent}
             onPress={() => onSelectNote(item)}
@@ -194,7 +208,13 @@ export default function SavedItemsList({
             ) : null}
           </Pressable>
 
-          <View style={[styles.actions, { borderTopColor: borderColor }]}>
+          {/* Archive action */}
+          <View
+            style={[
+              styles.actions,
+              { borderTopColor: borderColor },
+            ]}
+          >
             <Pressable
               onPress={() => handleArchive(item)}
               disabled={busyItemId !== null}
@@ -203,7 +223,9 @@ export default function SavedItemsList({
               hitSlop={8}
             >
               <Text style={styles.archiveText}>
-                {busyItemId === item.id ? 'Archiving...' : 'Archive'}
+                {busyItemId === item.id
+                  ? 'Archiving...'
+                  : 'Archive'}
               </Text>
             </Pressable>
           </View>
@@ -218,48 +240,58 @@ const styles = StyleSheet.create({
     flex: 1,
     marginTop: 24,
   },
+
   list: {
     paddingBottom: 120,
     gap: 12,
   },
+
   count: {
     fontSize: 12,
     marginBottom: 4,
   },
+
   card: {
     borderWidth: 1,
     borderRadius: 12,
     padding: 18,
     gap: 12,
   },
+
   cardContent: {
     gap: 9,
   },
+
   type: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.5,
   },
+
   itemTitle: {
     fontSize: 18,
     fontWeight: '600',
   },
+
   tags: {
     fontSize: 12,
     marginTop: 5,
   },
+
   actions: {
     borderTopWidth: 1,
     paddingTop: 14,
     flexDirection: 'row',
     justifyContent: 'flex-end',
   },
+
   archiveText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#A66A35',
     paddingVertical: 6,
   },
+
   emptyState: {
     borderWidth: 1,
     borderRadius: 12,

@@ -1,7 +1,8 @@
-
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +15,7 @@ import { useFocusEffect } from 'expo-router';
 
 import {
   getArchivedItems,
+  restoreItem,
   type SavedItem,
 } from '@/database/items';
 
@@ -24,6 +26,7 @@ export default function ArchiveScreen() {
   const [items, setItems] = useState<SavedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [busyItemId, setBusyItemId] = useState<number | null>(null);
 
   const colors = {
     background: isDark ? '#171B18' : '#F7F4ED',
@@ -69,6 +72,32 @@ export default function ArchiveScreen() {
     }, [db])
   );
 
+  async function handleRestore(item: SavedItem) {
+    if (busyItemId !== null) return;
+
+    setBusyItemId(item.id);
+
+    try {
+      await restoreItem(db, item.id);
+
+      // Remove the restored item from the Archive screen.
+      setItems((currentItems) =>
+        currentItems.filter(
+          (savedItem) => savedItem.id !== item.id
+        )
+      );
+    } catch (error) {
+      Alert.alert(
+        'Restore failed',
+        error instanceof Error
+          ? error.message
+          : 'Could not restore this item.'
+      );
+    } finally {
+      setBusyItemId(null);
+    }
+  }
+  
   return (
     <SafeAreaView
       style={[
@@ -137,6 +166,19 @@ export default function ArchiveScreen() {
                   {item.tags.map((tag) => `#${tag}`).join('  ')}
                 </Text>
               )}
+              <Pressable
+                style={styles.restoreButton}
+                onPress={() => {
+                  void handleRestore(item);
+                }}
+                disabled={busyItemId !== null}
+                accessibilityRole="button"
+                accessibilityLabel={`Restore ${item.title}`}
+              >
+                <Text style={styles.restoreText}>
+                  {busyItemId === item.id ? 'Restoring...' : 'Restore'}
+                </Text>
+              </Pressable>
             </View>
           ))}
         </ScrollView>
@@ -194,4 +236,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  restoreButton: {
+    alignSelf: 'flex-end',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+
+  restoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#A66A35',
+  },  
 });
