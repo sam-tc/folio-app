@@ -17,12 +17,10 @@ import {
   moveToRecentlyDeleted,
   type SavedItem,
 } from '@/database/items';
-
 import {
   searchLibraryItems,
   type LibraryFilter,
 } from '@/database/search';
-
 import { ItemActionsMenu } from '@/components/item-actions-menu';
 import EditImageModal from '@/components/edit-image-modal';
 
@@ -33,6 +31,21 @@ type Props = {
   onSelectNote: (item: SavedItem) => void;
   onSelectImage: (item: SavedItem) => void;
 };
+
+const MAX_VISIBLE_TAGS = 3;
+
+function formatSavedDate(value: string): string {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'short',
+  });
+}
 
 export default function SavedItemsList({
   refreshKey,
@@ -47,35 +60,35 @@ export default function SavedItemsList({
   const [items, setItems] = useState<SavedItem[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
   const [busyItemId, setBusyItemId] = useState<number | null>(null);
+  const [editingImage, setEditingImage] = useState<SavedItem | null>(null);
 
-  // The image currently being edited.
-  const [editingImage, setEditingImage] =
-    useState<SavedItem | null>(null);
-
-  const textColor = isDark ? '#F5F5F0' : '#222A22';
-  const secondaryColor = isDark ? '#C3CBC1' : '#526457';
-  const borderColor = isDark ? '#48594D' : '#D3DBD0';
+  // The same visual tokens work in light and dark mode.
+  const colors = {
+    text: isDark ? '#F7F4EE' : '#243126',
+    secondary: isDark ? '#B4C0B5' : '#627266',
+    subtle: isDark ? '#8B9B8D' : '#768679',
+    card: isDark ? '#202821' : '#FFFDF8',
+    border: isDark ? '#39483D' : '#DBE3D9',
+    accent: isDark ? '#D6B990' : '#45664D',
+    tagBackground: isDark ? '#2D3A30' : '#EDF2EA',
+    tagText: isDark ? '#D0DBCF' : '#49634F',
+    imageBackground: isDark ? '#303A32' : '#E8EDE6',
+  };
 
   const hasActiveSearch = searchQuery.trim().length > 0;
   const hasActiveFilter = filter !== 'all';
   const isSearching = hasActiveSearch || hasActiveFilter;
 
-  // Refresh Library when the screen gains focus,
-  // when an item changes, or when Search changes.
+  // Refresh the list after navigation, edits, or search/filter changes.
   useFocusEffect(
     useCallback(() => {
       let active = true;
 
       async function loadItems() {
         try {
-          const results = await searchLibraryItems(
-            db,
-            searchQuery,
-            filter
-          );
+          const results = await searchLibraryItems(db, searchQuery, filter);
 
           if (active) {
             setItems(results);
@@ -89,7 +102,6 @@ export default function SavedItemsList({
                 ? err.message
                 : 'Failed to search your library.'
             );
-
             setHasLoaded(true);
           }
         }
@@ -100,13 +112,7 @@ export default function SavedItemsList({
       return () => {
         active = false;
       };
-    }, [
-      db,
-      refreshKey,
-      localRefreshKey,
-      searchQuery,
-      filter,
-    ])
+    }, [db, refreshKey, localRefreshKey, searchQuery, filter])
   );
 
   async function handleCardPress(item: SavedItem) {
@@ -132,8 +138,6 @@ export default function SavedItemsList({
     }
   }
 
-  // Notes and Links use the existing editor.
-  // Images use the new image metadata editor.
   function handleEdit(item: SavedItem) {
     if (item.type === 'image') {
       setEditingImage(item);
@@ -143,7 +147,6 @@ export default function SavedItemsList({
   }
 
   function handleImageSaved() {
-    // Reload cards so the updated image details appear.
     setLocalRefreshKey((current) => current + 1);
   }
 
@@ -154,7 +157,6 @@ export default function SavedItemsList({
 
     try {
       await archiveItem(db, item.id);
-
       setLocalRefreshKey((current) => current + 1);
     } catch (err) {
       Alert.alert(
@@ -175,10 +177,7 @@ export default function SavedItemsList({
       'Archive this item?',
       `"${item.title}" will move to Archive. You can restore it later.`,
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Archive',
           onPress: () => {
@@ -196,7 +195,6 @@ export default function SavedItemsList({
 
     try {
       await moveToRecentlyDeleted(db, item.id);
-
       setLocalRefreshKey((current) => current + 1);
     } catch (err) {
       Alert.alert(
@@ -217,10 +215,7 @@ export default function SavedItemsList({
       'Move to Recently Deleted?',
       'You can recover this item within 30 days. After that, it will be permanently deleted.',
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Move to Trash',
           style: 'destructive',
@@ -234,12 +229,7 @@ export default function SavedItemsList({
 
   if (!hasLoaded) {
     return (
-      <Text
-        style={[
-          styles.statusText,
-          { color: secondaryColor },
-        ]}
-      >
+      <Text style={[styles.statusText, { color: colors.secondary }]}>
         Loading library...
       </Text>
     );
@@ -248,16 +238,10 @@ export default function SavedItemsList({
   if (error) {
     return (
       <View style={styles.messageContainer}>
-        <Text
-          style={[
-            styles.itemTitle,
-            { color: textColor },
-          ]}
-        >
+        <Text style={[styles.itemTitle, { color: colors.text }]}>
           Couldn't load your library
         </Text>
-
-        <Text style={{ color: secondaryColor }}>
+        <Text style={[styles.emptyDescription, { color: colors.secondary }]}>
           {error}
         </Text>
       </View>
@@ -269,29 +253,19 @@ export default function SavedItemsList({
       <View
         style={[
           styles.emptyState,
-          { borderColor },
+          { backgroundColor: colors.card, borderColor: colors.border },
         ]}
       >
-        <Text
-          style={[
-            styles.itemTitle,
-            { color: textColor },
-          ]}
-        >
-          {isSearching
-            ? 'No matching items'
-            : 'Your library starts here'}
+        <Text style={[styles.emptyEyebrow, { color: colors.accent }]}>
+          {isSearching ? 'NO RESULTS' : 'A FRESH PAGE'}
         </Text>
-
-        <Text
-          style={[
-            styles.emptyDescription,
-            { color: secondaryColor },
-          ]}
-        >
+        <Text style={[styles.itemTitle, { color: colors.text }]}>
+          {isSearching ? 'Nothing found just yet' : 'Your library starts here'}
+        </Text>
+        <Text style={[styles.emptyDescription, { color: colors.secondary }]}>
           {isSearching
-            ? 'Try a different search or select another filter.'
-            : 'Nothing saved yet. Your collection will appear here.'}
+            ? 'Try another word or change the selected filter.'
+            : 'Save a note, link, or image and it will appear here.'}
         </Text>
       </View>
     );
@@ -299,128 +273,138 @@ export default function SavedItemsList({
 
   return (
     <View style={styles.list}>
-      <Text
-        style={[
-          styles.count,
-          { color: secondaryColor },
-        ]}
-      >
+      <Text style={[styles.count, { color: colors.secondary }]}>
         {isSearching
-          ? `${items.length} ${
-              items.length === 1 ? 'result' : 'results'
-            } found`
-          : `${items.length} saved ${
-              items.length === 1 ? 'item' : 'items'
-            }`}
+          ? `${items.length} ${items.length === 1 ? 'result' : 'results'}`
+          : `${items.length} saved ${items.length === 1 ? 'item' : 'items'}`}
       </Text>
 
-      {items.map((item) => (
-        <View
-          key={item.id}
-          style={[
-            styles.card,
-            { borderColor },
-          ]}
-        >
-          {/* Tapping the card opens its content */}
-          <Pressable
-            style={styles.cardContent}
-            onPress={() => {
-              void handleCardPress(item);
-            }}
-            disabled={busyItemId !== null}
-            accessibilityRole="button"
-            accessibilityLabel={
-              item.type === 'link'
-                ? `Open ${item.title}`
-                : item.type === 'image'
-                  ? `View image ${item.title}`
-                  : `Edit ${item.title}`
-            }
+      {items.map((item) => {
+        const dateLabel = formatSavedDate(item.updated_at);
+        const visibleTags = item.tags.slice(0, MAX_VISIBLE_TAGS);
+        const hiddenTags = item.tags.length - visibleTags.length;
+
+        return (
+          <View
+            key={item.id}
+            style={[
+              styles.card,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
           >
-            <Text
-              style={[
-                styles.type,
-                { color: secondaryColor },
-              ]}
-            >
-              {item.type.toUpperCase()}
-            </Text>
+            <View style={styles.cardHeader}>
+              <View style={styles.metaRow}>
+                <View
+                  style={[styles.typeDot, { backgroundColor: colors.accent }]}
+                />
+                <Text style={[styles.type, { color: colors.accent }]}>
+                  {item.type.toUpperCase()}
+                </Text>
+                {dateLabel ? (
+                  <Text style={[styles.date, { color: colors.subtle }]}>
+                    ·  {dateLabel}
+                  </Text>
+                ) : null}
+              </View>
 
-            <Text
-              style={[
-                styles.itemTitle,
-                { color: textColor },
-              ]}
-            >
-              {item.title}
-            </Text>
-
-            {/* Image preview */}
-            {item.type === 'image' && item.image_uri && (
-              <Image
-                source={{ uri: item.image_uri }}
-                style={styles.imagePreview}
-                resizeMode="cover"
-                accessibilityLabel={`Saved image: ${item.title}`}
+              <ItemActionsMenu
+                itemTitle={item.title}
+                disabled={busyItemId !== null}
+                actions={[
+                  {
+                    label: 'Edit',
+                    onPress: () => handleEdit(item),
+                  },
+                  {
+                    label: 'Archive',
+                    onPress: () => handleArchive(item),
+                  },
+                  {
+                    label: 'Delete',
+                    destructive: true,
+                    onPress: () => handleMoveToTrash(item),
+                  },
+                ]}
               />
-            )}
+            </View>
 
-            {/* Note text, link URL, or image description */}
-            {item.content ? (
-              <Text
-                style={[
-                  styles.itemContent,
-                  { color: secondaryColor },
-                ]}
-                numberOfLines={3}
-              >
-                {item.content}
-              </Text>
-            ) : null}
-
-            {/* Tags */}
-            {item.tags.length > 0 ? (
-              <Text
-                style={[
-                  styles.tags,
-                  { color: secondaryColor },
-                ]}
-              >
-                {item.tags
-                  .map((tag) => `#${tag}`)
-                  .join('  ')}
-              </Text>
-            ) : null}
-          </Pressable>
-
-          {/* Three-dot menu now supports editing images */}
-          <View style={styles.menuRow}>
-            <ItemActionsMenu
-              itemTitle={item.title}
+            <Pressable
+              style={styles.cardContent}
+              onPress={() => {
+                void handleCardPress(item);
+              }}
               disabled={busyItemId !== null}
-              actions={[
-                {
-                  label: 'Edit',
-                  onPress: () => handleEdit(item),
-                },
-                {
-                  label: 'Archive',
-                  onPress: () => handleArchive(item),
-                },
-                {
-                  label: 'Delete',
-                  destructive: true,
-                  onPress: () => handleMoveToTrash(item),
-                },
-              ]}
-            />
-          </View>
-        </View>
-      ))}
+              accessibilityRole="button"
+              accessibilityLabel={
+                item.type === 'link'
+                  ? `Open ${item.title}`
+                  : item.type === 'image'
+                    ? `View image ${item.title}`
+                    : `Edit ${item.title}`
+              }
+            >
+              <Text
+                style={[styles.itemTitle, { color: colors.text }]}
+                numberOfLines={2}
+              >
+                {item.title}
+              </Text>
 
-      {/* Image editor stays within the Library component,
-          so Home and Search don't need changes. */}
+              {item.type === 'image' && item.image_uri ? (
+                <Image
+                  source={{ uri: item.image_uri }}
+                  style={[
+                    styles.imagePreview,
+                    { backgroundColor: colors.imageBackground },
+                  ]}
+                  resizeMode="cover"
+                  accessibilityLabel={`Saved image: ${item.title}`}
+                />
+              ) : null}
+
+              {item.content ? (
+                <Text
+                  style={[
+                    styles.itemContent,
+                    { color: colors.secondary },
+                    item.type === 'link' && { color: colors.accent },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {item.content}
+                </Text>
+              ) : null}
+
+              {item.tags.length > 0 ? (
+                <View style={styles.tagRow}>
+                  {visibleTags.map((tag, index) => (
+                    <View
+                      key={`${tag}-${index}`}
+                      style={[
+                        styles.tag,
+                        { backgroundColor: colors.tagBackground },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.tagText, { color: colors.tagText }]}
+                        numberOfLines={1}
+                      >
+                        #{tag}
+                      </Text>
+                    </View>
+                  ))}
+                  {hiddenTags > 0 ? (
+                    <Text style={[styles.moreTags, { color: colors.subtle }]}>
+                      +{hiddenTags}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </Pressable>
+          </View>
+        );
+      })}
+
       <EditImageModal
         image={editingImage}
         onClose={() => setEditingImage(null)}
@@ -432,84 +416,110 @@ export default function SavedItemsList({
 
 const styles = StyleSheet.create({
   statusText: {
-    marginTop: 32,
+    marginTop: 24,
+    fontSize: 14,
   },
-
   messageContainer: {
-    marginTop: 32,
+    marginTop: 24,
     gap: 10,
   },
-
   list: {
-    marginTop: 28,
-    gap: 12,
+    marginTop: 19,
+    gap: 10,
   },
-
   count: {
     fontSize: 12,
+    letterSpacing: 0.1,
     marginBottom: 4,
   },
-
   card: {
-    position: 'relative',
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 18,
-    paddingRight: 56,
-    gap: 12,
+    borderRadius: 18,
+    paddingHorizontal: 17,
+    paddingTop: 9,
+    paddingBottom: 18,
   },
-
-  cardContent: {
-    gap: 9,
+  cardHeader: {
+    minHeight: 43,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
   },
-
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    gap: 7,
+  },
+  typeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
   type: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1.5,
+    letterSpacing: 1.6,
   },
-
+  date: {
+    fontSize: 11,
+    fontWeight: '400',
+  },
+  cardContent: {
+    gap: 8,
+  },
   itemTitle: {
     fontSize: 18,
+    lineHeight: 25,
     fontWeight: '600',
+    letterSpacing: -0.4,
   },
-
   itemContent: {
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 19,
   },
-
   imagePreview: {
     width: '100%',
-    height: 190,
+    height: 165,
     borderRadius: 12,
-    backgroundColor: '#E6EBE5',
-    marginTop: 4,
+    marginVertical: 4,
   },
-
-  tags: {
-    fontSize: 12,
-    marginTop: 5,
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 3,
   },
-
-  menuRow: {
-    position: 'absolute',
-    top: 10,
-    right: 12,
-    zIndex: 10,
-    alignItems: 'flex-end',
+  tag: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    maxWidth: '72%',
   },
-
+  tagText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  moreTags: {
+    fontSize: 11,
+    marginLeft: 2,
+  },
   emptyState: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 18,
     padding: 24,
-    marginTop: 28,
+    marginTop: 16,
     gap: 10,
   },
-
+  emptyEyebrow: {
+    fontSize: 10,
+    letterSpacing: 1.8,
+    fontWeight: '700',
+  },
   emptyDescription: {
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 20,
   },
 });
