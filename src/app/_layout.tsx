@@ -1,35 +1,42 @@
-import { useFolioColorScheme as useColorScheme } from '@/components/appearance-provider';
+import { View, StyleSheet } from 'react-native';
 import {
   DarkTheme,
   DefaultTheme,
+  Stack,
   ThemeProvider,
 } from 'expo-router';
-import { SQLiteProvider } from 'expo-sqlite';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
-import { AppearanceProvider } from '@/components/appearance-provider';
-import { ForegroundCleanup } from '@/components/foreground-cleanup';
 
-import { initializeDatabase } from '@/database/database';
-import { purgeExpiredDeletedItems } from '@/database/items';
+import {
+  AppearanceProvider,
+  useFolioColorScheme,
+} from '@/components/appearance-provider';
+
+import {
+  AuthProvider,
+  useAuth,
+} from '@/components/auth-provider';
 
 void SplashScreen.preventAutoHideAsync();
 
-// Keep Folio's preference available above the whole navigation tree.
 export default function RootLayout() {
   return (
     <AppearanceProvider>
-      <FolioApp />
+      <AuthProvider>
+        <FolioApp />
+      </AuthProvider>
     </AppearanceProvider>
   );
 }
 
 function FolioApp() {
-  const colorScheme = useColorScheme();
+  const colorScheme = useFolioColorScheme();
   const isDark = colorScheme === 'dark';
+
+  const { session, loading } = useAuth();
 
   const navigationTheme = isDark
     ? {
@@ -55,41 +62,60 @@ function FolioApp() {
         },
       };
 
+  const backgroundColor = isDark
+    ? '#171B18'
+    : '#F7F4ED';
+
   return (
     <ThemeProvider value={navigationTheme}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <SQLiteProvider
-        databaseName="folio.db"
-        onInit={async (db) => {
-          await initializeDatabase(db);
 
-          const version = await db.getFirstAsync<{ user_version: number }>(
-            'PRAGMA user_version;'
-          );
-
-          const cleanupTable = await db.getFirstAsync<{ name: string }>(
-            `SELECT name
-             FROM sqlite_master
-             WHERE type = 'table'
-               AND name = 'pending_image_deletions'
-             LIMIT 1`
-          );
-
-          console.log(
-            'Folio schema:',
-            version?.user_version,
-            '| image cleanup table:',
-            cleanupTable ? 'ready' : 'missing'
-          );
-
-          const deletedCount = await purgeExpiredDeletedItems(db);
-          console.log('Folio automatic cleanup:', deletedCount, 'expired items removed');
-        }}
+      <View
+        style={[
+          styles.container,
+          { backgroundColor },
+        ]}
       >
-        <ForegroundCleanup />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: {
+              backgroundColor,
+            },
+          }}
+        >
+          <Stack.Protected guard={!!session}>
+            <Stack.Screen name="(private)" />
+          </Stack.Protected>
+
+          <Stack.Protected guard={!session}>
+            <Stack.Screen name="sign-in" />
+          </Stack.Protected>
+        </Stack>
+
+        {loading ? (
+          <View
+            style={[
+              styles.loadingCover,
+              { backgroundColor },
+            ]}
+            accessibilityLabel="Restoring Folio session"
+          />
+        ) : null}
+
         <AnimatedSplashOverlay />
-        <AppTabs />
-      </SQLiteProvider>
+      </View>
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+
+  loadingCover: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 10,
+  },
+});

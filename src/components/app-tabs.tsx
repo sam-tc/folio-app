@@ -11,9 +11,14 @@ export default function AppTabs() {
     <NativeTabs
       backgroundColor={colors.background}
       indicatorColor={colors.backgroundElement}
-      labelStyle={{ selected: { color: colors.text } }}>
+      labelStyle={{
+        selected: { color: colors.text },
+      }}
+    >
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>
+          Home
+        </NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/home.png')}
           renderingMode="template"
@@ -21,7 +26,9 @@ export default function AppTabs() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="explore">
-        <NativeTabs.Trigger.Label>Archive</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>
+          Archive
+        </NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/explore.png')}
           renderingMode="template"
@@ -29,10 +36,28 @@ export default function AppTabs() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="trash">
-        <NativeTabs.Trigger.Label>Deleted</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>
+          Deleted
+        </NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'trash', selected: 'trash.fill' }}
+          sf={{
+            default: 'trash',
+            selected: 'trash.fill',
+          }}
           md="delete"
+        />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="account">
+        <NativeTabs.Trigger.Label>
+          Account
+        </NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{
+            default: 'person.crop.circle',
+            selected: 'person.crop.circle.fill',
+          }}
+          md="account_circle"
         />
       </NativeTabs.Trigger>
     </NativeTabs>
