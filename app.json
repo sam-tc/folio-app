@@ -7,15 +7,10 @@
     "icon": "./assets/images/icon.png",
     "scheme": "folio",
     "userInterfaceStyle": "automatic",
-    "ios": {
-      "icon": "./assets/expo.icon"
-    },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#F7F1E7",
+        "foregroundImage": "./assets/images/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.samtc.folio"
@@ -50,7 +45,15 @@
             "enabled": false
           }
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#45664D",
+          "enableRemoteNotifications": false
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

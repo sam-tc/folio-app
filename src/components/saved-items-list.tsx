@@ -28,6 +28,8 @@ import {
 } from '@/database/search';
 
 import { synchronizeLibrary } from '@/lib/library-sync';
+import ReminderPickerModal from '@/components/reminder-picker-modal';
+import { cancelRemindersForItem } from '@/lib/reminders';
 
 type Props = {
   refreshKey: number;
@@ -76,6 +78,9 @@ export default function SavedItemsList({
     useState<number | null>(null);
 
   const [editingImage, setEditingImage] =
+    useState<SavedItem | null>(null);
+
+  const [reminderItem, setReminderItem] =
     useState<SavedItem | null>(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -286,6 +291,14 @@ export default function SavedItemsList({
     }
   }
 
+  function handleRemindLater(item: SavedItem) {
+    if (!userId || busyItemId !== null) {
+      return;
+    }
+
+    setReminderItem(item);
+  }
+
   function handleEdit(item: SavedItem) {
     if (item.type === 'image') {
       setEditingImage(item);
@@ -361,6 +374,17 @@ export default function SavedItemsList({
 
     try {
       await moveToRecentlyDeleted(db, item.id);
+
+      if (userId) {
+        try {
+          await cancelRemindersForItem(item.id, userId);
+        } catch (error) {
+          console.warn(
+            'Could not cancel reminder for deleted item:',
+            error
+          );
+        }
+      }
 
       setLocalRefreshKey(
         (current) => current + 1
@@ -624,6 +648,11 @@ export default function SavedItemsList({
                           handleEdit(item),
                       },
                       {
+                        label: 'Remind Later',
+                        onPress: () =>
+                          handleRemindLater(item),
+                      },
+                      {
                         label: 'Archive',
                         onPress: () =>
                           handleArchive(item),
@@ -753,6 +782,12 @@ export default function SavedItemsList({
         image={editingImage}
         onClose={() => setEditingImage(null)}
         onSaved={handleImageSaved}
+      />
+      <ReminderPickerModal
+        visible={reminderItem !== null}
+        item={reminderItem}
+        userId={userId}
+        onClose={() => setReminderItem(null)}
       />
     </View>
   );

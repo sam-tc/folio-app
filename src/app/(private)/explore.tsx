@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSQLiteContext } from 'expo-sqlite';
+import { useAuth } from '@/components/auth-provider';
+import { cancelRemindersForItem } from '@/lib/reminders';
 import { useFocusEffect } from 'expo-router';
 
 import { ItemActionsMenu } from '@/components/item-actions-menu';
@@ -24,6 +26,7 @@ import {
 
 export default function ArchiveScreen() {
   const db = useSQLiteContext();
+  const userId = useAuth().user?.id;
   const isDark = useColorScheme() === 'dark';
 
   const [items, setItems] = useState<SavedItem[]>([]);
@@ -110,6 +113,17 @@ export default function ArchiveScreen() {
 
     try {
       await moveToRecentlyDeleted(db, item.id);
+
+      if (userId) {
+        try {
+          await cancelRemindersForItem(item.id, userId);
+        } catch (error) {
+          console.warn(
+            'Could not cancel reminder for deleted item:',
+            error
+          );
+        }
+      }
 
       // Remove it from the visible Archive list.
       setItems((currentItems) =>

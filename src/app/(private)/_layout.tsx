@@ -6,7 +6,7 @@ import AppTabs from '@/components/app-tabs';
 import { useAuth } from '@/components/auth-provider';
 import { ForegroundCleanup } from '@/components/foreground-cleanup';
 import IncomingShareModal from '@/components/incoming-share-modal';
-
+import ReminderNotificationHandler from '@/components/reminder-notification-handler';
 import { installCloudDeletionTracking } from '@/database/cloud-deletion-tracking';
 import { initializeDatabase } from '@/database/database';
 import { purgeExpiredDeletedItems } from '@/database/items';
@@ -21,20 +21,12 @@ export default function PrivateLayout() {
     return null;
   }
 
-  // Keep each account's local items separate.
+  // Each account has its own local database.
   // The original folio.db remains untouched.
   const databaseName = `folio-user-${user.id}.db`;
 
-  function handleIncomingShareSaved() {
-    /*
-     * The shared item is already saved in SQLite.
-     *
-     * Remount the tabs so the Home Library loads
-     * its updated local records immediately.
-     *
-     * This occurs only after a successful share save,
-     * not during ordinary Library navigation.
-     */
+  function handleLibraryChanged() {
+    // Reload the Library after an item is saved or edited.
     setLibraryRevision((current) => current + 1);
   }
 
@@ -64,9 +56,13 @@ export default function PrivateLayout() {
         key={`${user.id}:${libraryRevision}`}
       />
 
+      <ReminderNotificationHandler
+        onSaved={handleLibraryChanged}
+      />
+
       {Platform.OS === 'android' ? (
         <IncomingShareModal
-          onSaved={handleIncomingShareSaved}
+          onSaved={handleLibraryChanged}
         />
       ) : null}
     </SQLiteProvider>
