@@ -1,9 +1,19 @@
-import { File } from 'expo-file-system';
+import * as Crypto from 'expo-crypto';
+import {
+  Directory,
+  File,
+  Paths,
+} from 'expo-file-system';
 
 import { supabase } from '@/lib/supabase';
 
 const IMAGE_BUCKET = 'folio-images';
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+
+const imageDirectory = new Directory(
+  Paths.document,
+  'folio-images'
+);
 
 const imageFormats: Record<
   string,
@@ -33,6 +43,14 @@ const imageFormats: Record<
     mimeType: 'image/heif',
     extension: 'heif',
   },
+  gif: {
+    mimeType: 'image/gif',
+    extension: 'gif',
+  },
+  avif: {
+    mimeType: 'image/avif',
+    extension: 'avif',
+  },
 };
 
 async function getCurrentUserId(): Promise<string> {
@@ -49,6 +67,7 @@ async function getCurrentUserId(): Promise<string> {
 
 function getImageFormat(uri: string) {
   const pathname = uri.split('?')[0];
+
   const extension = pathname
     .split('.')
     .pop()
@@ -60,7 +79,8 @@ function getImageFormat(uri: string) {
 
   if (!format) {
     throw new Error(
-      'Unsupported image format. Choose a JPG, PNG, WebP, HEIC or HEIF image.'
+      'Unsupported image format. Choose a JPG, PNG, ' +
+        'WebP, HEIC, HEIF, GIF or AVIF image.'
     );
   }
 
@@ -86,7 +106,7 @@ async function validateOwnImagePath(
   }
 }
 
-// Upload an image from the device into private storage.
+// Upload a locally saved photo to private Supabase Storage.
 export async function uploadPrivateImage(
   localUri: string
 ): Promise<string> {
@@ -98,7 +118,6 @@ export async function uploadPrivateImage(
 
   const userId = await getCurrentUserId();
   const format = getImageFormat(localUri);
-
   const file = new File(localUri);
 
   if (!file.exists) {
@@ -119,9 +138,7 @@ export async function uploadPrivateImage(
 
   const imageData = await file.arrayBuffer();
 
-  const uniqueName =
-    `${Date.now()}-` +
-    `${Math.random().toString(36).slice(2, 12)}`;
+  const uniqueName = Crypto.randomUUID();
 
   const path =
     `${userId}/${uniqueName}.${format.extension}`;
@@ -140,12 +157,11 @@ export async function uploadPrivateImage(
     );
   }
 
-  // Store this path in the cloud database,
-  // not the local file URI.
+  // Return the private storage path, not a public URL.
   return path;
 }
 
-// Get a temporary URL to display a private image.
+// Generate a temporary URL for an authenticated image.
 export async function getPrivateImageUrl(
   path: string
 ): Promise<string> {
@@ -163,11 +179,77 @@ export async function getPrivateImageUrl(
     );
   }
 
-  // This URL expires after 10 minutes.
   return data.signedUrl;
 }
 
-// Delete a cloud image when it is no longer needed.
+/**
+ * Download a cloud image into Folio's persistent
+ * local image directory.
+ *
+ * Unlike a signed URL, this local file remains
+ * available after the URL expires and while offline.
+ *
+ * It also uses the same directory as Stage 1,
+ * so the existing image-cleanup helper can manage
+ * downloaded files when they're no longer needed.
+ */
+export async function downloadPrivateImage(
+  path: string
+): Promise<string> {
+  await validateOwnImagePath(path);
+
+  const format = getImageFormat(path);
+
+  const signedUrl = await getPrivateImageUrl(path);
+
+  imageDirectory.create({
+    idempotent: true,
+    intermediates: true,
+  });
+
+  const filename =
+    `folio-cloud-${Crypto.randomUUID()}` +
+    `.${format.extension}`;
+
+  const destination = new File(
+    imageDirectory,
+    filename
+  );
+
+  try {
+    const downloaded = await File.downloadFileAsync(
+      signedUrl,
+      destination
+    );
+
+    if (
+      !downloaded.exists ||
+      downloaded.size === 0
+    ) {
+      throw new Error(
+        'The downloaded cloud image is empty.'
+      );
+    }
+
+    return downloaded.uri;
+  } catch (error) {
+    // Never leave a failed or partial download behind.
+    if (destination.exists) {
+      try {
+        destination.delete();
+      } catch (cleanupError) {
+        console.warn(
+          'Could not clean up incomplete cloud download:',
+          cleanupError
+        );
+      }
+    }
+
+    throw error;
+  }
+}
+
+// Delete a private cloud image permanently.
 export async function deletePrivateImage(
   path: string
 ): Promise<void> {

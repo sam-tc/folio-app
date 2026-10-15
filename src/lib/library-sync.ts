@@ -1,21 +1,60 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { downloadCloudImageItems } from '@/lib/download-image-items';
 import { downloadCloudTextItems } from '@/lib/download-text-items';
 import { supabase } from '@/lib/supabase';
 import { syncPendingCloudDeletions } from '@/lib/sync-deletions';
+import { syncPendingImageItems } from '@/lib/sync-image-items';
 import { syncPendingTextItems } from '@/lib/sync-items';
 
 const activeDatabases = new WeakSet<SQLiteDatabase>();
 
 export type LibrarySyncResult = {
   deleted: number;
+
   uploaded: number;
   downloaded: number;
   refreshed: number;
   removed: number;
   skippedPending: number;
+
+  imagesUploaded: number;
+  imagesDownloaded: number;
+  imagesRefreshed: number;
+  imagesRemoved: number;
+  imagesSkippedPending: number;
 };
 
+async function verifyCurrentUser(
+  expectedUserId: string
+): Promise<void> {
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+    throw new Error(
+      'Please sign in and connect to the internet to synchronize.'
+    );
+  }
+
+  if (data.user.id !== expectedUserId) {
+    throw new Error(
+      'The signed-in account changed. Synchronization stopped.'
+    );
+  }
+}
+
+/**
+ * Synchronize the authenticated user's Folio library.
+ *
+ * Order:
+ * 1. Delete permanently removed cloud records.
+ * 2. Upload pending notes and links.
+ * 3. Upload pending images.
+ * 4. Download cloud notes and links.
+ * 5. Download cloud images and metadata.
+ *
+ * Local items are preserved if synchronization fails.
+ */
 export async function synchronizeLibrary(
   db: SQLiteDatabase,
   expectedUserId: string
@@ -29,23 +68,11 @@ export async function synchronizeLibrary(
   activeDatabases.add(db);
 
   try {
-    const { data, error } = await supabase.auth.getUser();
+    await verifyCurrentUser(expectedUserId);
 
-    if (error || !data.user) {
-      throw new Error(
-        'Please sign in and connect to the internet to sync.'
-      );
-    }
-
-    if (data.user.id !== expectedUserId) {
-      throw new Error(
-        'The signed-in account changed. Sync was stopped.'
-      );
-    }
-
-    // Step 1: Complete permanent cloud deletions first.
-    // This prevents deleted records from being downloaded
-    // into the local Library again.
+    // 1. Process permanent deletions first.
+    // This prevents deleted items from reappearing
+    // when remote data is downloaded.
     const deletions = await syncPendingCloudDeletions(
       db,
       expectedUserId
@@ -57,46 +84,73 @@ export async function synchronizeLibrary(
     ) {
       throw new Error(
         `${deletions.remaining} cloud deletion(s) ` +
-          'still need to synchronize. Local data is preserved.'
+          'still need to synchronize.'
       );
     }
 
-    // Step 2: Upload pending local notes and links.
-    const uploads = await syncPendingTextItems(db);
+    await verifyCurrentUser(expectedUserId);
 
-    if (uploads.remaining > 0) {
+    // 2. Upload notes and links that changed locally.
+    const textUploads = await syncPendingTextItems(db);
+
+    if (textUploads.remaining > 0) {
       throw new Error(
-        `${uploads.remaining} item(s) still need to upload.`
+        `${textUploads.remaining} note or link ` +
+          'change(s) still need to upload.'
       );
     }
 
-    // Confirm the account hasn't changed during uploads.
-    const { data: current, error: sessionError } =
-      await supabase.auth.getUser();
+    await verifyCurrentUser(expectedUserId);
 
-    if (
-      sessionError ||
-      current.user?.id !== expectedUserId
-    ) {
+    // 3. Upload images and their metadata.
+    const imageUploads = await syncPendingImageItems(
+      db,
+      expectedUserId
+    );
+
+    if (imageUploads.remaining > 0) {
       throw new Error(
-        'The signed-in account changed during sync.'
+        `${imageUploads.remaining} image(s) ` +
+          'still need to upload.'
       );
     }
 
-    // Step 3: Download remote notes and links.
-    const downloads = await downloadCloudTextItems(db);
+    await verifyCurrentUser(expectedUserId);
+
+    // 4. Download notes and links.
+    const textDownloads = await downloadCloudTextItems(
+      db
+    );
+
+    await verifyCurrentUser(expectedUserId);
+
+    // 5. Download images into persistent local storage.
+    const imageDownloads = await downloadCloudImageItems(
+      db,
+      expectedUserId
+    );
+
+    await verifyCurrentUser(expectedUserId);
 
     return {
       deleted: deletions.deleted,
-      uploaded: uploads.uploaded,
-      downloaded: downloads.downloaded,
-      refreshed: downloads.refreshed,
-      removed: downloads.removed,
-      skippedPending: downloads.skippedPending,
+
+      uploaded: textUploads.uploaded,
+      downloaded: textDownloads.downloaded,
+      refreshed: textDownloads.refreshed,
+      removed: textDownloads.removed,
+      skippedPending: textDownloads.skippedPending,
+
+      imagesUploaded: imageUploads.uploaded,
+      imagesDownloaded: imageDownloads.downloaded,
+      imagesRefreshed: imageDownloads.refreshed,
+      imagesRemoved: imageDownloads.removed,
+      imagesSkippedPending:
+        imageDownloads.skippedPending,
     };
   } finally {
-    // Always release the synchronization lock,
-    // including when a network request fails.
+    // Release the synchronization lock even
+    // when a network operation fails.
     activeDatabases.delete(db);
   }
 }
