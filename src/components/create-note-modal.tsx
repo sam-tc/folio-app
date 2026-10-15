@@ -19,6 +19,7 @@ import {
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { createItem } from '@/database/items';
+import { syncPendingTextItems } from '@/lib/sync-items';
 
 type Props = {
   visible: boolean;
@@ -74,9 +75,15 @@ export default function CreateNoteModal({
   const colors = palettes[isDark ? 'dark' : 'light'];
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  // Cover the system status bar and home indicator without overlapping them.
-  const safeTop = Math.max(insets.top, initialWindowMetrics?.insets.top ?? 0);
-  const safeBottom = Math.max(insets.bottom, initialWindowMetrics?.insets.bottom ?? 0);
+  const safeTop = Math.max(
+    insets.top,
+    initialWindowMetrics?.insets.top ?? 0
+  );
+
+  const safeBottom = Math.max(
+    insets.bottom,
+    initialWindowMetrics?.insets.bottom ?? 0
+  );
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -93,6 +100,7 @@ export default function CreateNoteModal({
 
   function handleClose() {
     if (saving) return;
+
     resetForm();
     onClose();
   }
@@ -111,8 +119,10 @@ export default function CreateNoteModal({
     }
 
     setSaving(true);
+
     try {
-      // Database validation and URL normalization stay in createItem.
+      // Step 1: Save the item safely in local SQLite.
+      // This must succeed before attempting cloud sync.
       await createItem(db, {
         type: itemType,
         title,
@@ -122,19 +132,67 @@ export default function CreateNoteModal({
           .map((tag) => tag.trim())
           .filter(Boolean),
       });
-
-      resetForm();
-      onSaved();
-      onClose();
     } catch (error) {
+      setSaving(false);
+
       Alert.alert(
         isLink ? 'Could not save link' : 'Could not save note',
         error instanceof Error
           ? error.message
           : 'Something went wrong. Please try again.'
       );
-    } finally {
-      setSaving(false);
+
+      return;
+    }
+
+    // Local saving has succeeded at this point.
+    // Reset and close the form so the saved item appears
+    // immediately, even if internet access is unavailable.
+    setSaving(false);
+    resetForm();
+    onSaved();
+    onClose();
+
+    // Step 2: Attempt to synchronize pending notes and links.
+    // This runs after local saving, so a network failure cannot
+    // undo the successful SQLite save.
+    try {
+      console.log('FOLIO TEXT SYNC: STARTING');
+
+      const result = await syncPendingTextItems(db);
+
+      console.log(
+        'FOLIO TEXT SYNC: COMPLETE',
+        '| uploaded:',
+        result.uploaded,
+        '| remaining:',
+        result.remaining
+      );
+
+      if (result.remaining > 0) {
+        Alert.alert(
+          'Saved on this device',
+          'Some items are still waiting to synchronize.'
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'The cloud could not be reached.';
+
+      console.warn(
+        'FOLIO TEXT SYNC: FAILED',
+        message
+      );
+
+      Alert.alert(
+        'Saved on this device',
+        'Your item was saved locally, but cloud ' +
+          'synchronization did not finish. ' +
+          'It will remain pending until synchronization ' +
+          'is attempted again.'
+      );
     }
   }
 
@@ -145,10 +203,22 @@ export default function CreateNoteModal({
       presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
-      <View style={[styles.screen, { paddingTop: safeTop, paddingBottom: safeBottom }]}>
+      <View
+        style={[
+          styles.screen,
+          {
+            paddingTop: safeTop,
+            paddingBottom: safeBottom,
+          },
+        ]}
+      >
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={
+            Platform.OS === 'ios'
+              ? 'padding'
+              : undefined
+          }
         >
           <View style={styles.header}>
             <Pressable
@@ -158,7 +228,9 @@ export default function CreateNoteModal({
               accessibilityRole="button"
               accessibilityLabel="Cancel creation"
             >
-              <Text style={styles.cancel}>Cancel</Text>
+              <Text style={styles.cancel}>
+                Cancel
+              </Text>
             </Pressable>
 
             <Text style={styles.heading}>
@@ -166,13 +238,21 @@ export default function CreateNoteModal({
             </Text>
 
             <Pressable
-              style={[styles.headerAction, styles.headerActionRight]}
+              style={[
+                styles.headerAction,
+                styles.headerActionRight,
+              ]}
               onPress={() => void handleSave()}
               disabled={saving}
               accessibilityRole="button"
               accessibilityLabel="Save item"
             >
-              <Text style={[styles.save, saving && styles.saving]}>
+              <Text
+                style={[
+                  styles.save,
+                  saving && styles.saving,
+                ]}
+              >
                 {saving ? 'Saving…' : 'Save'}
               </Text>
             </Pressable>
@@ -181,13 +261,23 @@ export default function CreateNoteModal({
           <ScrollView
             contentContainerStyle={styles.form}
             keyboardShouldPersistTaps="handled"
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            keyboardDismissMode={
+              Platform.OS === 'ios'
+                ? 'interactive'
+                : 'on-drag'
+            }
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.eyebrow}>ADD TO FOLIO</Text>
-            <Text style={styles.title}>
-              {isLink ? 'Save something good.' : 'Capture a thought.'}
+            <Text style={styles.eyebrow}>
+              ADD TO FOLIO
             </Text>
+
+            <Text style={styles.title}>
+              {isLink
+                ? 'Save something good.'
+                : 'Capture a thought.'}
+            </Text>
+
             <Text style={styles.intro}>
               {isLink
                 ? 'Keep a useful corner of the internet close.'
@@ -195,48 +285,84 @@ export default function CreateNoteModal({
             </Text>
 
             <View style={styles.field}>
-              <Text style={styles.label}>TITLE</Text>
+              <Text style={styles.label}>
+                TITLE
+              </Text>
+
               <TextInput
                 style={styles.input}
                 value={title}
                 onChangeText={setTitle}
-                placeholder={isLink ? 'Give your link a title' : 'Give your note a title'}
+                placeholder={
+                  isLink
+                    ? 'Give your link a title'
+                    : 'Give your note a title'
+                }
                 placeholderTextColor={colors.placeholder}
                 selectionColor={colors.accent}
-                keyboardAppearance={isDark ? 'dark' : 'light'}
+                keyboardAppearance={
+                  isDark ? 'dark' : 'light'
+                }
                 maxLength={150}
-                accessibilityLabel={isLink ? 'Link title' : 'Note title'}
+                accessibilityLabel={
+                  isLink ? 'Link title' : 'Note title'
+                }
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.label}>{isLink ? 'WEBSITE URL' : 'YOUR NOTE'}</Text>
+              <Text style={styles.label}>
+                {isLink ? 'WEBSITE URL' : 'YOUR NOTE'}
+              </Text>
+
               <TextInput
-                style={[styles.input, !isLink && styles.textArea]}
+                style={[
+                  styles.input,
+                  !isLink && styles.textArea,
+                ]}
                 value={content}
                 onChangeText={setContent}
                 placeholder={
-                  isLink ? 'https://example.com' : 'Write something worth keeping…'
+                  isLink
+                    ? 'https://example.com'
+                    : 'Write something worth keeping…'
                 }
                 placeholderTextColor={colors.placeholder}
                 selectionColor={colors.accent}
-                keyboardAppearance={isDark ? 'dark' : 'light'}
+                keyboardAppearance={
+                  isDark ? 'dark' : 'light'
+                }
                 multiline={!isLink}
-                textAlignVertical={isLink ? undefined : 'top'}
-                keyboardType={isLink ? 'url' : 'default'}
-                autoCapitalize={isLink ? 'none' : 'sentences'}
+                textAlignVertical={
+                  isLink ? undefined : 'top'
+                }
+                keyboardType={
+                  isLink ? 'url' : 'default'
+                }
+                autoCapitalize={
+                  isLink ? 'none' : 'sentences'
+                }
                 autoCorrect={!isLink}
-                accessibilityLabel={isLink ? 'Website URL' : 'Note content'}
+                accessibilityLabel={
+                  isLink
+                    ? 'Website URL'
+                    : 'Note content'
+                }
               />
+
               {isLink && (
                 <Text style={styles.hint}>
-                  You can also enter a domain like github.com.
+                  You can also enter a domain like
+                  github.com.
                 </Text>
               )}
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.label}>TAGS</Text>
+              <Text style={styles.label}>
+                TAGS
+              </Text>
+
               <TextInput
                 style={styles.input}
                 value={tags}
@@ -244,11 +370,16 @@ export default function CreateNoteModal({
                 placeholder="college, ideas, reading"
                 placeholderTextColor={colors.placeholder}
                 selectionColor={colors.accent}
-                keyboardAppearance={isDark ? 'dark' : 'light'}
+                keyboardAppearance={
+                  isDark ? 'dark' : 'light'
+                }
                 autoCapitalize="none"
                 accessibilityLabel="Item tags"
               />
-              <Text style={styles.hint}>Separate multiple tags with commas.</Text>
+
+              <Text style={styles.hint}>
+                Separate multiple tags with commas.
+              </Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -260,7 +391,12 @@ export default function CreateNoteModal({
 function createStyles(colors: Palette) {
   return StyleSheet.create({
     flex: { flex: 1 },
-    screen: { flex: 1, backgroundColor: colors.background },
+
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+
     header: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -270,22 +406,45 @@ function createStyles(colors: Palette) {
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
     },
+
     headerAction: {
       minWidth: 72,
       minHeight: 44,
       justifyContent: 'center',
     },
-    headerActionRight: { alignItems: 'flex-end' },
+
+    headerActionRight: {
+      alignItems: 'flex-end',
+    },
+
     heading: {
       color: colors.text,
       fontSize: 16,
       fontWeight: '600',
       letterSpacing: -0.3,
     },
-    cancel: { color: colors.secondaryText, fontSize: 15 },
-    save: { color: colors.accent, fontSize: 15, fontWeight: '700' },
-    saving: { opacity: 0.5 },
-    form: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 48 },
+
+    cancel: {
+      color: colors.secondaryText,
+      fontSize: 15,
+    },
+
+    save: {
+      color: colors.accent,
+      fontSize: 15,
+      fontWeight: '700',
+    },
+
+    saving: {
+      opacity: 0.5,
+    },
+
+    form: {
+      paddingHorizontal: 24,
+      paddingTop: 28,
+      paddingBottom: 48,
+    },
+
     eyebrow: {
       color: colors.accent,
       fontSize: 11,
@@ -293,6 +452,7 @@ function createStyles(colors: Palette) {
       letterSpacing: 2.1,
       marginBottom: 10,
     },
+
     title: {
       color: colors.text,
       fontSize: 29,
@@ -301,13 +461,18 @@ function createStyles(colors: Palette) {
       letterSpacing: -1.1,
       marginBottom: 8,
     },
+
     intro: {
       color: colors.secondaryText,
       fontSize: 14,
       lineHeight: 21,
       marginBottom: 10,
     },
-    field: { marginTop: 22 },
+
+    field: {
+      marginTop: 22,
+    },
+
     label: {
       color: colors.secondaryText,
       fontSize: 11,
@@ -315,6 +480,7 @@ function createStyles(colors: Palette) {
       letterSpacing: 1.6,
       marginBottom: 10,
     },
+
     input: {
       color: colors.text,
       backgroundColor: colors.surface,
@@ -326,7 +492,11 @@ function createStyles(colors: Palette) {
       paddingVertical: 14,
       fontSize: 16,
     },
-    textArea: { minHeight: 175 },
+
+    textArea: {
+      minHeight: 175,
+    },
+
     hint: {
       color: colors.subtleText,
       fontSize: 12,

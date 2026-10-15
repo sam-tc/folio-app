@@ -1,26 +1,24 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const DATABASE_VERSION = 4;
+const DATABASE_VERSION = 5;
 
 export async function initializeDatabase(
   db: SQLiteDatabase
 ) {
-  // Enable Write-Ahead Logging.
+  // Improve reliability for normal database operations.
   await db.execAsync('PRAGMA journal_mode = WAL;');
 
-  // Read the current database schema version.
   const result = await db.getFirstAsync<{
     user_version: number;
   }>('PRAGMA user_version;');
 
   let currentVersion = result?.user_version ?? 0;
 
-  // Prevent older app versions from modifying newer databases.
   if (currentVersion > DATABASE_VERSION) {
     throw new Error('Unsupported database version.');
   }
 
-  // Version 0 -> 1: Create the original items table.
+  // Version 0 -> 1: Original local item storage.
   if (currentVersion === 0) {
     await db.withExclusiveTransactionAsync(async (txn) => {
       await txn.execAsync(`
@@ -45,7 +43,7 @@ export async function initializeDatabase(
     currentVersion = 1;
   }
 
-  // Version 1 -> 2: Add Recently Deleted support.
+  // Version 1 -> 2: Recently Deleted.
   if (currentVersion === 1) {
     await db.withExclusiveTransactionAsync(async (txn) => {
       const columns = await txn.getAllAsync<{
@@ -69,7 +67,7 @@ export async function initializeDatabase(
     currentVersion = 2;
   }
 
-  // Version 2 -> 3: Track image files needing cleanup.
+  // Version 2 -> 3: Queue local image cleanup.
   if (currentVersion === 2) {
     await db.withExclusiveTransactionAsync(async (txn) => {
       await txn.execAsync(`
@@ -85,7 +83,7 @@ export async function initializeDatabase(
     currentVersion = 3;
   }
 
-  // Version 3 -> 4: Prepare local items for cloud sync.
+  // Version 3 -> 4: Cloud synchronization fields.
   if (currentVersion === 3) {
     await db.withExclusiveTransactionAsync(async (txn) => {
       const columns = await txn.getAllAsync<{
@@ -95,8 +93,6 @@ export async function initializeDatabase(
       const hasColumn = (name: string) =>
         columns.some((column) => column.name === name);
 
-      // A cloud UUID identifies the matching Supabase record.
-      // NULL is allowed for existing, not-yet-synced items.
       if (!hasColumn('cloud_id')) {
         await txn.execAsync(`
           ALTER TABLE items
@@ -104,8 +100,6 @@ export async function initializeDatabase(
         `);
       }
 
-      // Keep the remote image location separate from
-      // the image file stored on this device.
       if (!hasColumn('cloud_image_path')) {
         await txn.execAsync(`
           ALTER TABLE items
@@ -113,7 +107,6 @@ export async function initializeDatabase(
         `);
       }
 
-      // Existing items need their first cloud upload.
       if (!hasColumn('sync_status')) {
         await txn.execAsync(`
           ALTER TABLE items
@@ -123,8 +116,6 @@ export async function initializeDatabase(
         `);
       }
 
-      // One local item must not point to the same cloud record
-      // as another local item.
       await txn.execAsync(`
         CREATE UNIQUE INDEX IF NOT EXISTS
           idx_items_cloud_id
@@ -132,8 +123,6 @@ export async function initializeDatabase(
         WHERE cloud_id IS NOT NULL;
       `);
 
-      // Preserve remote deletion requests across app restarts.
-      // We will use this when integrating permanent deletion.
       await txn.execAsync(`
         CREATE TABLE IF NOT EXISTS pending_cloud_deletions (
           cloud_id TEXT PRIMARY KEY,
@@ -148,7 +137,51 @@ export async function initializeDatabase(
     currentVersion = 4;
   }
 
-  // Preserve Stage 1's persistent image-cleanup queue.
+  // Version 4 -> 5: Track local edits automatically.
+  if (currentVersion === 4) {
+    await db.withExclusiveTransactionAsync(async (txn) => {
+      /*
+       * A SQLite trigger is an automatic database action.
+       *
+       * When a saved item's meaningful content or location
+       * changes, the record becomes pending again.
+       *
+       * Updating only cloud_id or sync_status does not
+       * trigger this rule.
+       */
+      await txn.execAsync(`
+        CREATE TRIGGER IF NOT EXISTS
+          mark_item_pending_after_edit
+        AFTER UPDATE OF
+          title,
+          content,
+          tags,
+          image_uri,
+          is_archived,
+          deleted_at
+        ON items
+        FOR EACH ROW
+        WHEN
+          OLD.title IS NOT NEW.title
+          OR OLD.content IS NOT NEW.content
+          OR OLD.tags IS NOT NEW.tags
+          OR OLD.image_uri IS NOT NEW.image_uri
+          OR OLD.is_archived IS NOT NEW.is_archived
+          OR OLD.deleted_at IS NOT NEW.deleted_at
+        BEGIN
+          UPDATE items
+          SET sync_status = 'pending'
+          WHERE id = NEW.id;
+        END;
+      `);
+
+      await txn.execAsync('PRAGMA user_version = 5;');
+    });
+
+    currentVersion = 5;
+  }
+
+  // Keep local image cleanup available.
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS pending_image_deletions (
       uri TEXT PRIMARY KEY,
@@ -156,7 +189,7 @@ export async function initializeDatabase(
     );
   `);
 
-  // Ensure the cloud-deletion queue exists.
+  // Keep pending remote deletions available.
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS pending_cloud_deletions (
       cloud_id TEXT PRIMARY KEY,
@@ -165,7 +198,6 @@ export async function initializeDatabase(
     );
   `);
 
-  // Verify both required cleanup tables exist.
   const tables = await db.getAllAsync<{
     name: string;
   }>(`
@@ -191,7 +223,22 @@ export async function initializeDatabase(
     );
   }
 
-  // Confirm that the database is now on the expected version.
+  // Verify the edit-tracking trigger exists.
+  const trigger = await db.getFirstAsync<{
+    name: string;
+  }>(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'trigger'
+      AND name = 'mark_item_pending_after_edit';
+  `);
+
+  if (!trigger) {
+    throw new Error(
+      'Folio cloud edit tracking could not be initialized.'
+    );
+  }
+
   const version = await db.getFirstAsync<{
     user_version: number;
   }>('PRAGMA user_version;');
