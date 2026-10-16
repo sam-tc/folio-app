@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Email verification | Folio</title>
+  <style>
+    :root { color-scheme: light; --forest:#214d38; --ink:#20362a; --muted:#6b796f; --cream:#f7f6f0; }
+    * { box-sizing: border-box; }
+    body { min-height:100svh; margin:0; background:var(--cream); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+    .shell { min-height:100svh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 20px; }
+    .brand { color:var(--forest); font-size:41px; font-weight:750; letter-spacing:-2.7px; margin:0 0 30px; }
+    .card { width:min(100%,470px); background:#fff; border:1px solid #e8ede5; border-radius:24px; box-shadow:0 15px 50px rgba(37,67,48,.055); padding:45px 34px 41px; text-align:center; }
+    .symbol { display:grid; place-items:center; width:76px; height:76px; margin:0 auto 22px; border-radius:50%; background:#e7f2e9; color:var(--forest); }
+    .symbol svg { width:36px; height:36px; }
+    .symbol.is-error { background:#fff0e9; color:#ac5030; }
+    .symbol.is-neutral { background:#f0f1eb; color:#788478; }
+    h1 { font-size:29px; line-height:1.18; letter-spacing:-.9px; margin:0 0 13px; }
+    .description { color:var(--muted); line-height:1.65; font-size:15px; margin:0 auto; max-width:325px; }
+    .divider { height:1px; background:#edf0e9; margin:28px 0 22px; }
+    .footnote { color:#7b887c; font-size:13px; line-height:1.6; margin:0; }
+    .tagline { color:#8c978c; font-size:13px; margin:27px 0 0; }
+    @media(max-width:420px) { .card { padding:39px 25px 36px; } h1 { font-size:26px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="brand" aria-label="Folio">folio.</div>
+    <section class="card" role="status" aria-live="polite">
+      <div class="symbol is-neutral" id="symbol" aria-hidden="true">
+        <svg id="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/>
+        </svg>
+      </div>
+      <h1 id="headline">Checking your verification…</h1>
+      <p class="description" id="description">Please wait while we confirm your email with Supabase.</p>
+      <div class="divider"></div>
+      <p class="footnote" id="instruction">You can return to Folio when this check finishes.</p>
+    </section>
+    <p class="tagline">Your space for everything worth saving.</p>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+
+      // These are PUBLIC browser credentials, not secret or service-role keys.
+      const SUPABASE_URL = "https://odapisbsqlgbghezthij.supabase.co";
+      const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_OY11eagUCHxD2j7Ni3yL3g_qLbKORci";
+
+      const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const query = new URLSearchParams(window.location.search);
+      const getParam = (key) => fragment.get(key) || query.get(key);
+      const errorCode = getParam("error_code") || getParam("error");
+      const errorDescription = getParam("error_description") || "";
+      const accessToken = fragment.get("access_token"); // Supabase implicit flow uses the URL fragment.
+      const authCode = getParam("code");
+
+      // Remove tokens/codes/error details from the browser address bar before
+      // making any network request. Never store or log credentials.
+      window.history.replaceState(null, "", window.location.pathname);
+
+      const symbol = document.getElementById("symbol");
+      const icon = document.getElementById("status-icon");
+      const headline = document.getElementById("headline");
+      const description = document.getElementById("description");
+      const instruction = document.getElementById("instruction");
+      const icons = {
+        success: '<path d="m5 12 4.5 4.5L19 7"/>',
+        error: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/>',
+        neutral: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/>'
+      };
+
+      function show(kind, title, message, hint) {
+        symbol.className = `symbol ${kind === "success" ? "" : `is-${kind}`}`.trim();
+        icon.innerHTML = icons[kind]; // Icons are fixed strings; no user input.
+        headline.textContent = title;
+        description.textContent = message;
+        instruction.textContent = hint;
+      }
+
+      async function checkVerification() {
+        if (errorCode) {
+          const expired = /expired|invalid|access_denied/i.test(`${errorCode} ${errorDescription}`);
+          show("error", "Verification failed",
+            expired ? "This verification link is expired, invalid, or has already been used."
+                    : "Supabase could not verify your email using this link.",
+            "Return to Folio and try signing in. If the account is unconfirmed, use a new verification link.");
+          return;
+        }
+
+        if (!accessToken) {
+          if (authCode) {
+            // A PKCE code cannot be exchanged on a different device without
+            // its original code_verifier. Never pretend this code confirms email.
+            show("neutral", "Verification needs another step",
+              "This link uses an authorization-code flow that this page cannot complete.",
+              "Try signing in to Folio to check whether your email was confirmed.");
+          } else {
+            show("neutral", "No verification result",
+              "Open the verification button in the email Folio sent you.",
+              "Visiting this page directly cannot confirm an email address.");
+          }
+          return;
+        }
+
+        try {
+          // Auth server validates the JWT and returns the actual user record.
+          // A URL parameter by itself is never considered proof of verification.
+          const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+            method: "GET",
+            headers: {
+              apikey: SUPABASE_PUBLISHABLE_KEY,
+              Authorization: `Bearer ${accessToken}`
+            },
+            cache: "no-store",
+            referrerPolicy: "no-referrer"
+          });
+
+          if (!response.ok) {
+            show("error", "Couldn't confirm verification",
+              "Supabase could not validate this session. The link may be invalid or expired.",
+              "Return to Folio and try signing in. If needed, request a fresh verification email.");
+            return;
+          }
+
+          const user = await response.json();
+          if (user && typeof user.email_confirmed_at === "string" && user.email_confirmed_at.length > 0) {
+            show("success", "Email verified!",
+              "Your email address has been confirmed successfully. Your Folio account is ready.",
+              "You can now return to the Folio app and sign in.");
+          } else {
+            show("neutral", "Email not confirmed yet",
+              "Supabase recognizes this account, but its email isn't confirmed.",
+              "Return to Folio and use a valid verification email to finish signup.");
+          }
+        } catch (_error) {
+          show("error", "Unable to check right now",
+            "We couldn't contact Supabase to check your verification status.",
+            "Check your connection, then try signing in to Folio.");
+        }
+      }
+
+      void checkVerification();
+    })();
+  </script>
+</body>
+</html>
