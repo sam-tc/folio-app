@@ -6,85 +6,248 @@ Ever saved a link and forgotten where it went? Screenshotted something useful, o
 
 That's why I built **Folio** — a personal pocket library for the things you want to return to.
 
-One place. Three ways to save. No unnecessary clutter.
+**One place. Three ways to save. No unnecessary clutter.**
 
-## What can Folio do?
+---
+
+## ✦ What is Folio?
+
+Folio is a cross-platform, local-first save-for-later app built with React Native and Expo. It brings notes, links, and images into one organized library, making it easy to capture something now and find it again later.
+
+**BYTE App Development — Stage 3**
+
+Advanced missions: **A — Better Sync Behaviour** and **D — Resurface an Item Later**
+
+## ✨ What can Folio do?
+
+### Save, organize, rediscover
 
 - **Notes** — Capture ideas, thoughts, and anything worth writing down.
-- **Links** — Save useful websites and open them again whenever you need them.
-- **Images** — Keep visual references and photos alongside your other saved items.
-- **Library** — Browse everything in one place, with search and filters.
+- **Links** — Save useful websites and open them again later.
+- **Images** — Keep photos and visual references alongside your other items.
+- **Library** — Search, filter, and organize content using tags.
 - **Archive** — Put things away without losing them.
-- **Recently Deleted** — Restore accidentally deleted items before their 30-day cleanup.
-- **Appearance** — Choose Light, Dark, or System mode, with your preference remembered.
+- **Recently Deleted** — Restore deleted items before their 30-day cleanup.
+- **Appearance** — Switch between Light, Dark, and System themes.
 
-Saved content is stored locally using SQLite, so your library survives app restarts without requiring an internet connection.
+### Your library, on your terms
 
-## The tech behind it
+- **Authentication** — Sign up and sign in with Supabase Auth.
+- **Private cloud storage** — Keep account data in Supabase with backend-enforced ownership.
+- **Local-first access** — Store saved content on the device using SQLite.
+- **Offline synchronization** — Continue saving locally during connectivity problems and retry synchronization.
+- **Share into Folio** — Receive text and URLs directly from Android's native Share menu.
+- **Remind me later** — Schedule notifications that bring you back to a saved item.
+
+## 🛠️ Built with
 
 | Technology | Purpose |
 |---|---|
 | React Native | Cross-platform mobile interface |
-| Expo | Development and native platform tooling |
-| TypeScript | Safer, maintainable application code |
+| Expo | Development, native APIs, and builds |
+| TypeScript | Type-safe application code |
 | Expo Router | File-based navigation |
-| SQLite | Local persistent storage |
-| Expo Image Picker / File System | Image selection and file management |
+| SQLite | Persistent local database |
+| Expo File System | Local image storage |
+| Supabase Auth | Authentication and sessions |
+| Supabase PostgreSQL | Remote item storage |
+| Supabase Storage | Private image storage |
+| PostgreSQL RLS | Backend-enforced data ownership |
+| Expo Notifications | Scheduled reminders |
+| EAS Build | Android APK generation |
 
-## Getting started
+## 🏗️ Architecture
 
-**Requirements:** Node.js, npm, and Expo Go or a compatible development build.
+Folio follows a **local-first architecture**. The app keeps a local copy of saved content for responsive access, while Supabase provides authentication, private cloud storage, and synchronization.
+
+```mermaid
+flowchart TD
+    A["Folio Mobile App<br/>React Native + Expo + TypeScript"]
+    B["Expo Router<br/>Screens and Navigation"]
+
+    C[("SQLite<br/>Local Items and Cache")]
+    D["Device File System<br/>Local Images"]
+
+    E["Sync Layer<br/>Offline Retry and Reconciliation"]
+
+    F["Supabase Auth<br/>User Sessions"]
+    G[("Supabase PostgreSQL<br/>folio_items + RLS")]
+    H["Supabase Storage<br/>Private Images"]
+
+    I["Android Share Menu<br/>Text and URLs"]
+    J["Local Notifications<br/>Scheduled Reminders"]
+
+    I --> A
+    J <--> A
+    A --> B
+
+    B <--> C
+    B <--> D
+    B --> F
+
+    C <--> E
+    D <--> E
+    F --> E
+
+    E <--> G
+    E <--> H
+```
+
+### How it works
+
+**1. Local storage**
+
+Saved items and metadata are stored in SQLite, while image files are kept in the device's file system. This makes the local library available without continuously requesting data from the server.
+
+**2. Authentication**
+
+Supabase Auth manages registration, login, and user sessions. Cloud operations use the authenticated user's session.
+
+**3. Cloud synchronization**
+
+The sync layer coordinates local changes with Supabase PostgreSQL and Storage. When the connection fails, pending changes can be retried once connectivity returns.
+
+**4. Privacy and ownership**
+
+Every cloud item is associated with an `owner_id`. PostgreSQL Row Level Security (RLS) restricts item operations to the authenticated owner. Private storage policies protect uploaded images.
+
+Security is enforced on the backend, not merely by filtering items in the interface.
+
+**5. Native sharing**
+
+Android's Share menu can send text and URLs into Folio. The shared content is presented for review before saving. Unsupported or malformed content is handled without crashing.
+
+**6. Reminders**
+
+Local notifications let users resurface an item at a chosen date and time. Tapping a notification opens the relevant saved item. Reminders are cancelled when their associated item is deleted.
+
+## ⚡ Advanced missions
+
+### Mission A — Better Sync Behaviour
+
+Folio improves reliability when network connectivity is interrupted.
+
+- Locally saved content remains accessible.
+- Pending changes can be retried after connection recovery.
+- Remote and local items are reconciled to reduce duplication.
+- Local image synchronization and deletion handling are included.
+
+**Conflict policy:** Pending local changes are prioritized during reconciliation. Simultaneous edits on different devices are not merged field by field, so an earlier version may be overwritten. This is a known limitation of the current synchronization approach.
+
+### Mission D — Resurface an Item Later
+
+Saved things are only useful if you remember to revisit them.
+
+- Choose a date and time for a reminder.
+- Receive a local notification.
+- Tap to open the corresponding item.
+- Reschedule or cancel an existing reminder.
+- Automatically cancel reminders for deleted items.
+
+## 🚀 Getting started
+
+### Requirements
+
+- Node.js and npm
+- Expo Go for supported development workflows
+- A configured Supabase project
+- Android development build or APK for native sharing
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/sam-tc/folio-app.git
 cd folio-app
+```
+
+### 2. Install dependencies
+
+```bash
 npm install
+```
+
+### 3. Configure Supabase
+
+Create a `.env.local` file in the project root:
+
+```env
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
+EXPO_PUBLIC_SUPABASE_KEY=your_supabase_publishable_or_anon_key
+```
+
+Use the public client key for your Supabase project, not a secret or service-role key.
+
+The Supabase project must have the required database table, Row Level Security policies, and private storage configuration.
+
+### 4. Start Folio
+
+```bash
 npx expo start
 ```
 
-Scan the QR code using Expo Go on a supported device, or launch the app using an available simulator.
+Scan the QR code using Expo Go on a compatible device, or launch a supported simulator.
 
-For development checks:
+Some features, including Android's native share integration, require an actual development or standalone build rather than Expo Go.
+
+### 5. Build an Android APK
+
+The repository includes an EAS `preview` profile configured for Android APK generation.
 
 ```bash
-npx tsc --noEmit
-npx expo-doctor
+npx eas-cli login
+npx eas-cli build --platform android --profile preview
 ```
 
-Some native capabilities require a development build rather than Expo Go.
+The EAS `preview` environment must contain the required Supabase configuration.
 
-## How it works
+Once the build finishes, Expo provides a build page and an APK download link.
 
-Folio keeps its saved items in a local SQLite database. Each item has a type and associated content, allowing notes, links, and images to share the same library experience.
+## 🧪 Testing
 
-Images are stored as files with their metadata managed separately. Archive and deletion operations change an item's state, making recovery possible before permanent cleanup.
+Folio was developed and tested incrementally, with Git commits marking meaningful milestones.
 
-The interface separates capturing, browsing, editing, and managing saved content into simple, focused flows.
+| Area | Verification |
+|---|---|
+| Notes, links, images | Local create/edit/save flows tested on iPhone |
+| SQLite persistence | Saved content retained across app restarts |
+| Archive and Recently Deleted | Archive, restore, delete, and cleanup workflows tested |
+| Supabase authentication | Sign-in and private account flows tested |
+| Backend privacy | Account B could not read, edit, or delete Account A's protected item |
+| Offline behaviour | Offline save and reconnect workflow tested |
+| Cloud images | Upload/download and reconciliation workflows tested |
+| Android sharing | Chrome Share menu, save, cancel, and closed-app launch tested |
+| Reminders | Schedule, delivery, notification tap, reschedule, cancellation, and deleted-item handling tested |
 
-## Design philosophy
+### Known limitations
 
-**Make saving effortless. Make rediscovery enjoyable.**
+- Full cross-device behaviour has not been independently verified on two physical devices.
+- Concurrent remote edits do not have advanced field-level conflict resolution.
+- Android's native Share-menu integration has been tested; equivalent iOS native share-extension behaviour is not claimed.
 
-Folio is designed to feel more like a personal collection than a productivity dashboard. The focus is on readable content, clear interactions, thoughtful colors, and minimal friction.
+## 💡 Technical decisions
 
-## Testing
+**Why SQLite and Supabase?**
 
-The local-first workflows have been exercised on iPhone, including:
+SQLite provides local persistence and responsive access, while Supabase adds authentication, private remote storage, and synchronization. This avoids making every interaction depend on a network request.
 
-- Creating and editing notes, links, and images
-- Searching and filtering saved content
-- Archiving, restoring, and deleting items
-- Persisting content across app restarts
-- Switching between appearance modes
+**Why Row Level Security?**
 
-Native features and Android-specific behaviour should be checked in their respective builds before being marked as fully verified.
+Client-side filtering is not sufficient for privacy. RLS allows PostgreSQL to enforce ownership even if someone attempts to access another user's data directly.
 
-## Future improvements
+**Why local notifications?**
 
-More reliable cross-device synchronization, native sharing, and reminders are natural extensions of Folio's core experience.
+Reminders can be scheduled on the device without requiring a separate notification server.
+
+**Why Expo?**
+
+Expo simplifies cross-platform development, provides access to native device APIs, and supports generating Android builds through EAS.
+
+## 🌱 What's next?
+
+Potential future improvements include richer conflict resolution, more comprehensive cross-device testing, and extending native sharing support across platforms.
 
 ---
 
-**Built with curiosity, iterations, and a lot of testing.**
+### Keep what matters. Find it when it matters.
 
-*Keep what matters. Find it when it matters.*
+**Folio** — Built with curiosity, iteration, and a lot of testing.
